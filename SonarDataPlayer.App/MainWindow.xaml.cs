@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -47,6 +48,7 @@ public partial class MainWindow : Window
     private TemperatureUnit _temperatureUnit = TemperatureUnit.Celsius;
     private double _zoomWindowSeconds;
     private int _utcOffsetHours = -4;
+    private AppSettings _settings = AppSettings.Load();
 
     public MainWindow()
     {
@@ -112,6 +114,44 @@ public partial class MainWindow : Window
         await ExportRsdProjectAsync(rsdDialog.FileName, folderDialog.SelectedPath);
     }
 
+    private void PythonSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Select Python executable",
+            Filter = "Python executable (python.exe)|python.exe|Executables (*.exe)|*.exe|All files (*.*)|*.*"
+        };
+
+        var initialPath = _settings.PythonPath;
+        if (!string.IsNullOrWhiteSpace(initialPath) && File.Exists(initialPath))
+        {
+            dialog.InitialDirectory = Path.GetDirectoryName(initialPath);
+            dialog.FileName = Path.GetFileName(initialPath);
+        }
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        if (!PythonHasParserDependencies(dialog.FileName))
+        {
+            MessageBox.Show(
+                this,
+                "That Python executable is missing modules needed by the Garmin parser.\n\n" +
+                $"Run:\n{dialog.FileName} -m pip install numpy pandas",
+                "Python dependencies missing",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
+
+        _settings = _settings with { PythonPath = dialog.FileName };
+        _settings.Save();
+        ProjectStatusText.Text = "Python configured";
+        ProjectStatusText.Foreground = new SolidColorBrush(Color.FromRgb(88, 214, 141));
+    }
+
     private async Task ExportRsdProjectAsync(string rsdPath, string outputPath)
     {
         var scriptPath = FindExportScript();
@@ -130,9 +170,26 @@ public partial class MainWindow : Window
         ProjectStatusText.Text = "Exporting project...";
         ProjectStatusText.Foreground = new SolidColorBrush(Color.FromRgb(255, 239, 132));
 
+        var pythonPath = FindPythonExecutable(_settings);
+        if (pythonPath is null)
+        {
+            ProjectStatusText.Text = "Python dependencies missing";
+            ProjectStatusText.Foreground = new SolidColorBrush(Color.FromRgb(255, 116, 116));
+            MessageBox.Show(
+                this,
+                "Could not find a Python environment with the modules needed by the Garmin parser.\n\n" +
+                "Install the parser dependencies with:\n" +
+                "python -m pip install numpy pandas\n\n" +
+                "You can also set SONAR_DATA_PLAYER_PYTHON to a specific python.exe.",
+                "Python dependencies missing",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
+
         var startInfo = new ProcessStartInfo
         {
-            FileName = FindPythonExecutable(),
+            FileName = pythonPath,
             WorkingDirectory = Path.GetDirectoryName(scriptPath) ?? AppContext.BaseDirectory,
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -202,10 +259,73 @@ public partial class MainWindow : Window
         return candidates.FirstOrDefault(File.Exists);
     }
 
-    private static string FindPythonExecutable()
+    private static string? FindPythonExecutable(AppSettings settings)
     {
         var configured = Environment.GetEnvironmentVariable("SONAR_DATA_PLAYER_PYTHON");
-        return string.IsNullOrWhiteSpace(configured) ? "python" : configured;
+        var candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            candidates.Add(configured);
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.PythonPath))
+        {
+            candidates.Add(settings.PythonPath);
+        }
+
+        candidates.AddRange(new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "python", "python.exe"),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".venv", "Scripts", "python.exe")),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "PINGverter", ".venv", "Scripts", "python.exe")),
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".cache",
+                "codex-runtimes",
+                "codex-primary-runtime",
+                "dependencies",
+                "python",
+                "python.exe"),
+            "python",
+            "py"
+        });
+
+        return candidates
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(PythonHasParserDependencies);
+    }
+
+    private static bool PythonHasParserDependencies(string pythonPath)
+    {
+        if (Path.IsPathFullyQualified(pythonPath) && !File.Exists(pythonPath))
+        {
+            return false;
+        }
+
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = pythonPath,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            }
+        };
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add("import numpy, pandas");
+
+        try
+        {
+            process.Start();
+            return process.WaitForExit(5000) && process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private void LoadRecording(string manifestPath)
@@ -1068,4 +1188,43 @@ public enum TemperatureUnit
 {
     Celsius,
     Fahrenheit
+}
+
+public sealed record AppSettings(string? PythonPath)
+{
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
+    private static string SettingsPath =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "SonarDataPlayer",
+            "settings.json");
+
+    public static AppSettings Load()
+    {
+        try
+        {
+            if (!File.Exists(SettingsPath))
+            {
+                return new AppSettings(PythonPath: null);
+            }
+
+            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath)) ?? new AppSettings(PythonPath: null);
+        }
+        catch
+        {
+            return new AppSettings(PythonPath: null);
+        }
+    }
+
+    public void Save()
+    {
+        var directory = Path.GetDirectoryName(SettingsPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        File.WriteAllText(SettingsPath, JsonSerializer.Serialize(this, JsonOptions));
+    }
 }
