@@ -1,18 +1,20 @@
 # SonarDataPlayer
 
-SonarDataPlayer is a lightweight Windows desktop application for playing back processed sonar recordings. The first target is Garmin RSD data exported into synchronized channel waterfall PNGs and ping telemetry CSV files.
+SonarDataPlayer is a lightweight Windows desktop application for playing back processed sonar recordings. The first target is Garmin RSD data exported into synchronized channel waterfall views and ping telemetry.
 
-The app is intentionally a single-process .NET desktop program: no Python runtime, web server, Node.js, or browser frontend is required for playback.
+The app is intentionally a single-process .NET desktop program: no web server, Node.js, or browser frontend is required for playback. A Python bridge is currently used only when creating a new processed project from a Garmin `.RSD` file.
 
 ## Current Status
 
 - WPF desktop application shell.
 - Core playback and telemetry models.
 - Processed project manifest loader.
-- Stacked channel waterfall display using generated PNGs.
+- In-app Garmin RSD project creation through the bridge exporter.
+- Raw sample playback using `frames.jsonl` and `samples.u16le`, with PNG preview/fallback assets.
 - Play, pause, seek, speed selection, channel visibility, opacity controls, and telemetry readouts.
+- Depth, speed, temperature unit controls, time/depth zoom, and stacked/overlay channel views.
 
-Direct Garmin RSD parsing will be ported into the application after the playback UI is validated against processed exports.
+The Garmin RSD parser is still bridged from the local PINGverter parser. Porting direct RSD parsing into the application remains a future cleanup step.
 
 ## Repository Layout
 
@@ -26,6 +28,7 @@ docs/                     Project format and development notes
 
 - Windows 10 or later.
 - .NET 8 SDK or newer.
+- Python 3 with `numpy` and `pandas` if you want to create projects from `.RSD` files inside the app or with `tools/export_rsd_project.py`.
 
 Check your SDK:
 
@@ -52,6 +55,30 @@ Use **Open Project** and select a processed `manifest.json`.
 
 See [docs/processed-project-format.md](docs/processed-project-format.md) for the expected folder layout.
 
+## Create A Project From RSD
+
+In the app:
+
+1. Use **Python...** to select a `python.exe` that can import `numpy` and `pandas`.
+2. Use **New Project**.
+3. Select a Garmin `.RSD` file.
+4. Choose or create the output project folder.
+
+On success, the app loads the generated `manifest.json` automatically.
+
+Python selection priority is:
+
+1. `SONAR_DATA_PLAYER_PYTHON` environment variable.
+2. Saved app setting from **Python...**.
+3. Local/bundled Python candidates.
+4. System `python` or `py`.
+
+Install the parser dependencies into your chosen Python environment:
+
+```powershell
+python -m pip install numpy pandas
+```
+
 ## Package A Portable Windows Build
 
 ```powershell
@@ -68,7 +95,7 @@ The portable executable will be written to `publish\win-x64`.
 
 ## Processed Recording Workflow
 
-For now, generate processed assets from the Garmin RSD parser with the bridge exporter:
+You can also generate processed assets from the Garmin RSD parser with the bridge exporter:
 
 ```powershell
 python .\tools\export_rsd_project.py `
@@ -90,7 +117,7 @@ The exporter writes:
 - `samples.u16le`
 - `channels\*_channel_*.png`
 
-The manual workflow is:
+The exporter workflow is:
 
 1. Parse the `.RSD` file.
 2. Export ping metadata to CSV.
@@ -108,8 +135,6 @@ When `frames.jsonl` and `samples.u16le` are present, the app renders from raw sa
 
 ## Planned Next Steps
 
-- Add a first-class processed-project exporter.
-- Render waterfall viewports instead of full-image scaling.
-- Add overlay mode with per-channel opacity and palette controls.
 - Port Garmin RSD parsing into `SonarDataPlayer.Core`.
-- Add direct raw sample rendering with gain and contrast controls.
+- Add direct rendering controls for gain, contrast, palettes, and side-scan handling.
+- Improve packaged Python/exporter deployment or remove the Python bridge entirely.
