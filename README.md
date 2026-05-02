@@ -68,7 +68,27 @@ The portable executable will be written to `publish\win-x64`.
 
 ## Processed Recording Workflow
 
-For now, generate processed assets from the Garmin RSD parser:
+For now, generate processed assets from the Garmin RSD parser with the bridge exporter:
+
+```powershell
+python .\tools\export_rsd_project.py `
+  "..\SonarRecordings\Sonar000.RSD" `
+  ".\ProcessedRecordings\Sonar000"
+```
+
+Then run the app and open:
+
+```text
+ProcessedRecordings\Sonar000\manifest.json
+```
+
+The exporter writes:
+
+- `manifest.json`
+- `pings.csv`
+- `channels\*_channel_*.png`
+
+The manual workflow is:
 
 1. Parse the `.RSD` file.
 2. Export ping metadata to CSV.
