@@ -1,7 +1,7 @@
 <Window x:Class="SonarDataPlayer.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Sonar Data Player v0.1.1"
+        Title="Sonar Data Player v0.1.2"
         Height="820"
         MinHeight="620"
         Width="1280"
@@ -32,7 +32,7 @@
                 <StackPanel DockPanel.Dock="Right"
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
-                    <TextBlock Text="v0.1.1"
+                    <TextBlock Text="v0.1.2"
                                Foreground="#8E9AAD"
                                VerticalAlignment="Center"
                                Margin="0,0,18,0" />
@@ -138,6 +138,17 @@
                         <ComboBoxItem Content="Knots" Tag="Knots" />
                     </ComboBox>
 
+                    <TextBlock Text="Water Temp"
+                               Foreground="#8E9AAD"
+                               Margin="0,10,0,4" />
+                    <ComboBox x:Name="TemperatureUnitSelector"
+                              Height="32"
+                              SelectedIndex="0"
+                              SelectionChanged="UnitSelector_SelectionChanged">
+                        <ComboBoxItem Content="Celsius" Tag="Celsius" />
+                        <ComboBoxItem Content="Fahrenheit" Tag="Fahrenheit" />
+                    </ComboBox>
+
                     <TextBlock Text="UTC Offset"
                                Foreground="#8E9AAD"
                                Margin="0,10,0,4" />
@@ -208,14 +219,14 @@
         <UniformGrid Grid.Row="3"
                      Columns="8"
                      Margin="16,10">
-            <TextBlock x:Name="DateTimeReadout" Foreground="#EEF2F7" Text="Time: -" />
-            <TextBlock x:Name="DepthReadout" Foreground="#EEF2F7" Text="Depth: -" />
-            <TextBlock x:Name="RangeReadout" Foreground="#EEF2F7" Text="Range: -" />
-            <TextBlock x:Name="PositionReadout" Foreground="#EEF2F7" Text="Position: -" />
-            <TextBlock x:Name="SpeedReadout" Foreground="#EEF2F7" Text="Speed: -" />
-            <TextBlock x:Name="HeadingReadout" Foreground="#EEF2F7" Text="Heading: -" />
-            <TextBlock x:Name="TempReadout" Foreground="#EEF2F7" Text="Temp: -" />
-            <TextBlock x:Name="PingReadout" Foreground="#EEF2F7" Text="Ping: -" />
+            <TextBlock x:Name="DateTimeReadout" Foreground="#EEF2F7" FontSize="15" FontWeight="SemiBold" Text="Time: -" />
+            <TextBlock x:Name="DepthReadout" Foreground="#EEF2F7" FontSize="15" FontWeight="SemiBold" Text="Depth: -" />
+            <TextBlock x:Name="RangeReadout" Foreground="#EEF2F7" FontSize="15" FontWeight="SemiBold" Text="Range: -" />
+            <TextBlock x:Name="PositionReadout" Foreground="#EEF2F7" FontSize="15" FontWeight="SemiBold" Text="Position: -" />
+            <TextBlock x:Name="SpeedReadout" Foreground="#EEF2F7" FontSize="15" FontWeight="SemiBold" Text="Speed: -" />
+            <TextBlock x:Name="HeadingReadout" Foreground="#EEF2F7" FontSize="15" FontWeight="SemiBold" Text="Heading: -" />
+            <TextBlock x:Name="TempReadout" Foreground="#EEF2F7" FontSize="15" FontWeight="SemiBold" Text="Water Temp: -" />
+            <TextBlock x:Name="PingReadout" Foreground="#EEF2F7" FontSize="15" FontWeight="SemiBold" Text="Ping: -" />
         </UniformGrid>
     </Grid>
 </Window>

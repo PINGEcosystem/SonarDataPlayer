@@ -21,12 +21,14 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _timer;
     private readonly List<Image> _sonarImages = new();
     private readonly List<Rectangle> _timeCursors = new();
+    private readonly List<TextBlock> _cursorTimeLabels = new();
     private SonarRecording? _recording;
     private IReadOnlyDictionary<int, BitmapSource> _rawChannelImages = new Dictionary<int, BitmapSource>();
     private DateTimeOffset _lastTick = DateTimeOffset.Now;
     private bool _isUpdatingSeek;
     private DepthUnit _depthUnit = DepthUnit.Meters;
     private SpeedUnit _speedUnit = SpeedUnit.Mph;
+    private TemperatureUnit _temperatureUnit = TemperatureUnit.Celsius;
     private double _zoomWindowSeconds;
     private int _utcOffsetHours = -4;
 
@@ -147,6 +149,7 @@ public partial class MainWindow : Window
     {
         _depthUnit = SelectedDepthUnit();
         _speedUnit = SelectedSpeedUnit();
+        _temperatureUnit = SelectedTemperatureUnit();
         _utcOffsetHours = SelectedUtcOffsetHours();
         RenderChannels();
         UpdateReadouts();
@@ -202,7 +205,7 @@ public partial class MainWindow : Window
         PositionReadout.Text = $"Position: {Format(ping.Latitude, "0.000000")}, {Format(ping.Longitude, "0.000000")}";
         SpeedReadout.Text = $"Speed: {FormatSpeed(ping.SpeedMetersPerSecond)}";
         HeadingReadout.Text = $"Heading: {Format(ping.HeadingDegrees, "0")} deg";
-        TempReadout.Text = $"Temp: {Format(ping.TemperatureCelsius, "0.0 C")}";
+        TempReadout.Text = $"Water Temp: {FormatTemperature(ping.TemperatureCelsius)}";
         PingReadout.Text = $"Ping: {ping.RecordNumber}  Ch: {ping.ChannelId}  Samples: {ping.SampleCount}";
     }
 
@@ -244,6 +247,22 @@ public partial class MainWindow : Window
         return $"{value:0.0} {suffix}";
     }
 
+    private string FormatTemperature(double? celsius)
+    {
+        if (!celsius.HasValue)
+        {
+            return "-";
+        }
+
+        var (value, suffix) = _temperatureUnit switch
+        {
+            TemperatureUnit.Fahrenheit => ((celsius.Value * 9.0 / 5.0) + 32.0, "F"),
+            _ => (celsius.Value, "C")
+        };
+
+        return $"{value:0.0} {suffix}";
+    }
+
     private string FormatLocalTime(DateTime? utc)
     {
         if (!utc.HasValue)
@@ -253,6 +272,17 @@ public partial class MainWindow : Window
 
         var local = DateTime.SpecifyKind(utc.Value, DateTimeKind.Utc).AddHours(_utcOffsetHours);
         return $"{local:yyyy-MM-dd HH:mm:ss} UTC{_utcOffsetHours:+0;-0;+0}";
+    }
+
+    private string FormatCursorLocalTime()
+    {
+        if (_recording?.FindNearestTelemetry(_playback.CurrentTimeSeconds)?.TimestampUtc is not { } utc)
+        {
+            return string.Empty;
+        }
+
+        var local = DateTime.SpecifyKind(utc, DateTimeKind.Utc).AddHours(_utcOffsetHours);
+        return local.ToString("yyyy-MM-dd HH:mm:ss");
     }
 
     private DepthUnit SelectedDepthUnit()
@@ -271,6 +301,15 @@ public partial class MainWindow : Window
                Enum.TryParse<SpeedUnit>(tag, out var unit)
             ? unit
             : SpeedUnit.Mph;
+    }
+
+    private TemperatureUnit SelectedTemperatureUnit()
+    {
+        return TemperatureUnitSelector?.SelectedItem is ComboBoxItem item &&
+               item.Tag is string tag &&
+               Enum.TryParse<TemperatureUnit>(tag, out var unit)
+            ? unit
+            : TemperatureUnit.Celsius;
     }
 
     private int SelectedUtcOffsetHours()
@@ -297,6 +336,7 @@ public partial class MainWindow : Window
         ViewerHost.RowDefinitions.Clear();
         _sonarImages.Clear();
         _timeCursors.Clear();
+        _cursorTimeLabels.Clear();
 
         if (_recording is null)
         {
@@ -367,6 +407,7 @@ public partial class MainWindow : Window
 
         panel.Children.Add(labels);
         panel.Children.Add(CreateCursor());
+        panel.Children.Add(CreateCursorTimeLabel());
         ViewerHost.Children.Add(panel);
     }
 
@@ -388,6 +429,7 @@ public partial class MainWindow : Window
         }
 
         panel.Children.Add(CreateCursor());
+        panel.Children.Add(CreateCursorTimeLabel());
         return panel;
     }
 
@@ -433,6 +475,24 @@ public partial class MainWindow : Window
 
         _timeCursors.Add(cursor);
         return cursor;
+    }
+
+    private TextBlock CreateCursorTimeLabel()
+    {
+        var label = new TextBlock
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Foreground = Brushes.Black,
+            Background = new SolidColorBrush(Color.FromRgb(255, 239, 132)),
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            Padding = new Thickness(4, 2, 4, 2),
+            Margin = new Thickness(0, 0, 0, 4)
+        };
+
+        _cursorTimeLabels.Add(label);
+        return label;
     }
 
     private Canvas CreateDepthGrid(int? channelId)
@@ -585,6 +645,21 @@ public partial class MainWindow : Window
 
             cursor.Margin = new Thickness((parent.ActualWidth - cursor.Width) * t, 0, 0, 0);
         }
+
+        var labelText = FormatCursorLocalTime();
+        foreach (var label in _cursorTimeLabels)
+        {
+            if (label.Parent is not FrameworkElement parent || parent.ActualWidth <= 0)
+            {
+                continue;
+            }
+
+            label.Text = labelText;
+            label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            var left = ((parent.ActualWidth - 2) * t) + 6;
+            var maxLeft = Math.Max(0, parent.ActualWidth - label.DesiredSize.Width);
+            label.Margin = new Thickness(Math.Clamp(left, 0, maxLeft), 0, 0, 4);
+        }
     }
 
     private void UpdateImageViewports()
@@ -714,4 +789,10 @@ public enum SpeedUnit
 {
     Mph,
     Knots
+}
+
+public enum TemperatureUnit
+{
+    Celsius,
+    Fahrenheit
 }
