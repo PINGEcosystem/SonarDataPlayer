@@ -4,6 +4,7 @@ public sealed record PingTelemetry(
     long RecordNumber,
     int ChannelId,
     double TimeSeconds,
+    DateTime? TimestampUtc,
     int SampleCount,
     double? MinimumRangeMeters,
     double? MaximumRangeMeters,

@@ -104,6 +104,7 @@ public static class ProcessedProjectLoader
                 Long(cells, index, "record_num"),
                 Int(cells, index, "channel_id"),
                 Double(cells, index, "time_s"),
+                DateTimeUtc(cells, index),
                 Int(cells, index, "ping_cnt", "sample_cnt"),
                 NullableDouble(cells, index, "min_range", "first_sample_depth"),
                 NullableDouble(cells, index, "max_range", "last_sample_depth"),
@@ -171,6 +172,26 @@ public static class ProcessedProjectLoader
         }
 
         return null;
+    }
+
+    private static DateTime? DateTimeUtc(string[] cells, IReadOnlyDictionary<string, int> index)
+    {
+        if (!index.TryGetValue("date", out var dateIndex) ||
+            !index.TryGetValue("time", out var timeIndex) ||
+            dateIndex >= cells.Length ||
+            timeIndex >= cells.Length)
+        {
+            return null;
+        }
+
+        var text = $"{cells[dateIndex]} {cells[timeIndex]}";
+        return DateTime.TryParse(
+            text,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var value)
+            ? DateTime.SpecifyKind(value, DateTimeKind.Utc)
+            : null;
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()

@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<ChannelViewModel> _channels = new();
     private readonly PlaybackState _playback = new();
     private readonly DispatcherTimer _timer;
+    private readonly List<Image> _sonarImages = new();
     private readonly List<Rectangle> _timeCursors = new();
     private SonarRecording? _recording;
     private IReadOnlyDictionary<int, BitmapSource> _rawChannelImages = new Dictionary<int, BitmapSource>();
@@ -26,6 +27,8 @@ public partial class MainWindow : Window
     private bool _isUpdatingSeek;
     private DepthUnit _depthUnit = DepthUnit.Meters;
     private SpeedUnit _speedUnit = SpeedUnit.Mph;
+    private double _zoomWindowSeconds;
+    private int _utcOffsetHours = -4;
 
     public MainWindow()
     {
@@ -103,6 +106,7 @@ public partial class MainWindow : Window
 
     private void ViewerHost_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        UpdateImageViewports();
         UpdateCursorPositions();
     }
 
@@ -143,8 +147,16 @@ public partial class MainWindow : Window
     {
         _depthUnit = SelectedDepthUnit();
         _speedUnit = SelectedSpeedUnit();
+        _utcOffsetHours = SelectedUtcOffsetHours();
         RenderChannels();
         UpdateReadouts();
+    }
+
+    private void ZoomSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _zoomWindowSeconds = SelectedZoomWindowSeconds();
+        UpdateImageViewports();
+        UpdateCursorPositions();
     }
 
     private void Timer_Tick(object? sender, EventArgs e)
@@ -175,6 +187,7 @@ public partial class MainWindow : Window
         _isUpdatingSeek = false;
 
         TimeReadout.Text = $"{_playback.CurrentTimeSeconds:0.0} / {_recording.DurationSeconds:0.0} s";
+        UpdateImageViewports();
         UpdateCursorPositions();
 
         var ping = _recording.FindNearestTelemetry(_playback.CurrentTimeSeconds);
@@ -183,6 +196,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        DateTimeReadout.Text = $"Time: {FormatLocalTime(ping.TimestampUtc)}";
         DepthReadout.Text = $"Depth: {FormatDepth(ping.DepthMeters)}";
         RangeReadout.Text = $"Range: {FormatDepth(ping.MinimumRangeMeters)} - {FormatDepth(ping.MaximumRangeMeters)}";
         PositionReadout.Text = $"Position: {Format(ping.Latitude, "0.000000")}, {Format(ping.Longitude, "0.000000")}";
@@ -230,6 +244,17 @@ public partial class MainWindow : Window
         return $"{value:0.0} {suffix}";
     }
 
+    private string FormatLocalTime(DateTime? utc)
+    {
+        if (!utc.HasValue)
+        {
+            return "-";
+        }
+
+        var local = DateTime.SpecifyKind(utc.Value, DateTimeKind.Utc).AddHours(_utcOffsetHours);
+        return $"{local:yyyy-MM-dd HH:mm:ss} UTC{_utcOffsetHours:+0;-0;+0}";
+    }
+
     private DepthUnit SelectedDepthUnit()
     {
         return DepthUnitSelector?.SelectedItem is ComboBoxItem item &&
@@ -248,10 +273,29 @@ public partial class MainWindow : Window
             : SpeedUnit.Mph;
     }
 
+    private int SelectedUtcOffsetHours()
+    {
+        return UtcOffsetSelector?.SelectedItem is ComboBoxItem item &&
+               item.Tag is string tag &&
+               int.TryParse(tag, out var offset)
+            ? offset
+            : -4;
+    }
+
+    private double SelectedZoomWindowSeconds()
+    {
+        return ZoomSelector?.SelectedItem is ComboBoxItem item &&
+               item.Tag is string tag &&
+               double.TryParse(tag, out var seconds)
+            ? seconds
+            : 0;
+    }
+
     private void RenderChannels()
     {
         ViewerHost.Children.Clear();
         ViewerHost.RowDefinitions.Clear();
+        _sonarImages.Clear();
         _timeCursors.Clear();
 
         if (_recording is null)
@@ -303,12 +347,7 @@ public partial class MainWindow : Window
 
         foreach (var channel in channels)
         {
-            panel.Children.Add(new Image
-            {
-                Source = channel.Image,
-                Stretch = Stretch.Fill,
-                Opacity = channel.Opacity
-            });
+            panel.Children.Add(CreateSonarImage(channel));
         }
 
         panel.Children.Add(CreateDepthGrid(null));
@@ -339,12 +378,7 @@ public partial class MainWindow : Window
             Background = Brushes.Black
         };
 
-        panel.Children.Add(new Image
-        {
-            Source = channel.Image,
-            Stretch = Stretch.Fill,
-            Opacity = channel.Opacity
-        });
+        panel.Children.Add(CreateSonarImage(channel));
 
         panel.Children.Add(CreateDepthGrid(channel.Channel.ChannelId));
 
@@ -372,6 +406,20 @@ public partial class MainWindow : Window
                 Text = label
             }
         };
+    }
+
+    private Image CreateSonarImage(ChannelViewModel channel)
+    {
+        var image = new Image
+        {
+            Source = channel.Image,
+            Stretch = Stretch.Fill,
+            Opacity = channel.Opacity,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+        _sonarImages.Add(image);
+        return image;
     }
 
     private Rectangle CreateCursor()
@@ -524,7 +572,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        var t = Math.Clamp(_playback.CurrentTimeSeconds / _recording.DurationSeconds, 0, 1);
+        var (visibleStart, visibleDuration) = GetVisibleTimeWindow();
+        var t = visibleDuration <= 0
+            ? 0
+            : Math.Clamp((_playback.CurrentTimeSeconds - visibleStart) / visibleDuration, 0, 1);
         foreach (var cursor in _timeCursors)
         {
             if (cursor.Parent is not FrameworkElement parent || parent.ActualWidth <= 0)
@@ -534,6 +585,46 @@ public partial class MainWindow : Window
 
             cursor.Margin = new Thickness((parent.ActualWidth - cursor.Width) * t, 0, 0, 0);
         }
+    }
+
+    private void UpdateImageViewports()
+    {
+        if (_recording is null || _recording.DurationSeconds <= 0)
+        {
+            return;
+        }
+
+        var (visibleStart, visibleDuration) = GetVisibleTimeWindow();
+        foreach (var image in _sonarImages)
+        {
+            if (image.Parent is not FrameworkElement parent || parent.ActualWidth <= 0)
+            {
+                continue;
+            }
+
+            var scale = _recording.DurationSeconds / visibleDuration;
+            var imageWidth = parent.ActualWidth * scale;
+            var left = -(visibleStart / _recording.DurationSeconds) * imageWidth;
+            image.Width = imageWidth;
+            image.Margin = new Thickness(left, 0, 0, 0);
+        }
+    }
+
+    private (double Start, double Duration) GetVisibleTimeWindow()
+    {
+        if (_recording is null || _recording.DurationSeconds <= 0)
+        {
+            return (0, 1);
+        }
+
+        var duration = _zoomWindowSeconds <= 0
+            ? _recording.DurationSeconds
+            : Math.Min(_zoomWindowSeconds, _recording.DurationSeconds);
+        var start = Math.Clamp(
+            _playback.CurrentTimeSeconds - (duration / 2.0),
+            0,
+            Math.Max(0, _recording.DurationSeconds - duration));
+        return (start, duration);
     }
 }
 
