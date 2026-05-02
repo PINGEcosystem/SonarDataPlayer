@@ -22,6 +22,8 @@ public partial class MainWindow : Window
     private readonly List<Image> _sonarImages = new();
     private readonly List<Rectangle> _timeCursors = new();
     private readonly List<TextBlock> _cursorTimeLabels = new();
+    private TextBlock? _viewerDepthReadout;
+    private TextBlock? _viewerTempReadout;
     private SonarRecording? _recording;
     private IReadOnlyDictionary<int, BitmapSource> _rawChannelImages = new Dictionary<int, BitmapSource>();
     private DateTimeOffset _lastTick = DateTimeOffset.Now;
@@ -207,6 +209,7 @@ public partial class MainWindow : Window
         HeadingReadout.Text = $"Heading: {Format(ping.HeadingDegrees, "0")} deg";
         TempReadout.Text = $"Water Temp: {FormatTemperature(ping.TemperatureCelsius)}";
         PingReadout.Text = $"Ping: {ping.RecordNumber}  Ch: {ping.ChannelId}  Samples: {ping.SampleCount}";
+        UpdateViewerTelemetry(ping);
     }
 
     private static string Format(double? value, string format)
@@ -337,6 +340,8 @@ public partial class MainWindow : Window
         _sonarImages.Clear();
         _timeCursors.Clear();
         _cursorTimeLabels.Clear();
+        _viewerDepthReadout = null;
+        _viewerTempReadout = null;
 
         if (_recording is null)
         {
@@ -359,6 +364,7 @@ public partial class MainWindow : Window
             RenderStacked(visibleChannels);
         }
 
+        AddViewerTelemetryOverlay();
         UpdateCursorPositions();
     }
 
@@ -368,7 +374,7 @@ public partial class MainWindow : Window
         {
             ViewerHost.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-            var panel = CreateChannelPanel(channels[i], includeLabel: true);
+            var panel = CreateChannelPanel(channels[i]);
             panel.Margin = new Thickness(0, 0, 0, i == channels.Count - 1 ? 0 : 8);
             Grid.SetRow(panel, i);
             ViewerHost.Children.Add(panel);
@@ -392,26 +398,12 @@ public partial class MainWindow : Window
 
         panel.Children.Add(CreateDepthGrid(null));
 
-        var labels = new StackPanel
-        {
-            Orientation = Orientation.Vertical,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(8)
-        };
-
-        foreach (var channel in channels)
-        {
-            labels.Children.Add(CreateLabel(channel.Label));
-        }
-
-        panel.Children.Add(labels);
         panel.Children.Add(CreateCursor());
         panel.Children.Add(CreateCursorTimeLabel());
         ViewerHost.Children.Add(panel);
     }
 
-    private Grid CreateChannelPanel(ChannelViewModel channel, bool includeLabel)
+    private Grid CreateChannelPanel(ChannelViewModel channel)
     {
         var panel = new Grid
         {
@@ -423,31 +415,78 @@ public partial class MainWindow : Window
 
         panel.Children.Add(CreateDepthGrid(channel.Channel.ChannelId));
 
-        if (includeLabel)
-        {
-            panel.Children.Add(CreateLabel(channel.Label));
-        }
-
         panel.Children.Add(CreateCursor());
         panel.Children.Add(CreateCursorTimeLabel());
         return panel;
     }
 
-    private Border CreateLabel(string label)
+    private void AddViewerTelemetryOverlay()
     {
-        return new Border
+        var border = new Border
         {
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
-            Background = new SolidColorBrush(Color.FromArgb(176, 0, 0, 0)),
-            Padding = new Thickness(8, 4, 8, 4),
-            Child = new TextBlock
+            Background = new SolidColorBrush(Color.FromArgb(198, 255, 255, 244)),
+            Padding = new Thickness(10, 6, 12, 8),
+            Margin = new Thickness(10),
+            Child = new StackPanel
             {
-                Foreground = Brushes.White,
-                FontWeight = FontWeights.SemiBold,
-                Text = label
+                Children =
+                {
+                    (_viewerDepthReadout = new TextBlock
+                    {
+                        Foreground = Brushes.Black,
+                        FontFamily = new FontFamily("Consolas"),
+                        FontSize = 46,
+                        FontWeight = FontWeights.Bold,
+                        LineHeight = 44,
+                        Text = "--.-"
+                    }),
+                    (_viewerTempReadout = new TextBlock
+                    {
+                        Foreground = new SolidColorBrush(Color.FromRgb(40, 40, 40)),
+                        FontFamily = new FontFamily("Consolas"),
+                        FontSize = 18,
+                        FontWeight = FontWeights.SemiBold,
+                        Margin = new Thickness(1, 0, 0, 0),
+                        Text = "--.-"
+                    })
+                }
             }
         };
+
+        Grid.SetRowSpan(border, Math.Max(1, ViewerHost.RowDefinitions.Count));
+        Panel.SetZIndex(border, 20);
+        ViewerHost.Children.Add(border);
+        UpdateViewerTelemetry(_recording?.FindNearestTelemetry(_playback.CurrentTimeSeconds));
+    }
+
+    private void UpdateViewerTelemetry(PingTelemetry? ping)
+    {
+        if (_viewerDepthReadout is null || _viewerTempReadout is null)
+        {
+            return;
+        }
+
+        _viewerDepthReadout.Text = FormatDigitalDepth(ping?.DepthMeters);
+        _viewerTempReadout.Text = FormatTemperature(ping?.TemperatureCelsius);
+    }
+
+    private string FormatDigitalDepth(double? meters)
+    {
+        if (!meters.HasValue)
+        {
+            return "--.-";
+        }
+
+        var (value, suffix) = _depthUnit switch
+        {
+            DepthUnit.Feet => (meters.Value * 3.280839895, "ft"),
+            DepthUnit.Fathoms => (meters.Value / 1.8288, "fm"),
+            _ => (meters.Value, "m")
+        };
+
+        return $"{value:0.0}{suffix}";
     }
 
     private Image CreateSonarImage(ChannelViewModel channel)
