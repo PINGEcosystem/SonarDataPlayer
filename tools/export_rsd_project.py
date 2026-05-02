@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import os
 import sys
 import types
@@ -60,9 +61,14 @@ def main() -> int:
     sonar._parseFileHeader()
     sonar._parsePingHeader()
     sonar._recalcRecordNum()
+    recompute_track_speed(sonar.header_dat)
 
     pings_csv = output_dir / "pings.csv"
     sonar.header_dat.to_csv(pings_csv, index=False)
+
+    samples_path = output_dir / "samples.u16le"
+    frames_path = output_dir / "frames.jsonl"
+    frame_count = write_binary_frames(sonar, samples_path, frames_path)
 
     waterfall_paths = sonar.write_channel_waterfall_pngs(str(channel_dir))
 
@@ -86,8 +92,15 @@ def main() -> int:
         )
 
     manifest = {
+        "formatVersion": 2,
         "source": str(rsd_path),
         "telemetry": relpath(pings_csv, output_dir),
+        "frames": relpath(frames_path, output_dir),
+        "samples": {
+            "path": relpath(samples_path, output_dir),
+            "encoding": "uint16-le",
+        },
+        "frameCount": frame_count,
         "channels": channels,
     }
 
@@ -95,8 +108,135 @@ def main() -> int:
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     print(f"Wrote {manifest_path}")
+    print(f"Frames: {frame_count}")
     print(f"Channels: {', '.join(str(c['channelId']) for c in channels)}")
     return 0
+
+
+def recompute_track_speed(df) -> None:
+    """Recompute per-frame track distance and speed from WGS84 coordinates."""
+    if not {"sequence_cnt", "time_s", "lat", "lon"}.issubset(df.columns):
+        return
+
+    frame_track = (
+        df.groupby("sequence_cnt", sort=True)
+        .agg(time_s=("time_s", "mean"), lat=("lat", "mean"), lon=("lon", "mean"))
+        .reset_index()
+    )
+
+    distances = [0.0]
+    speeds = [math.nan]
+    cumulative = [0.0]
+
+    for i in range(1, len(frame_track)):
+        prev = frame_track.iloc[i - 1]
+        cur = frame_track.iloc[i]
+        dist = haversine_m(prev["lat"], prev["lon"], cur["lat"], cur["lon"])
+        dt = float(cur["time_s"] - prev["time_s"])
+
+        distances.append(dist)
+        speeds.append(dist / dt if dt > 0 else math.nan)
+        cumulative.append(cumulative[-1] + dist)
+
+    frame_track["dist"] = distances
+    frame_track["speed_ms"] = speeds
+    frame_track["trk_dist"] = cumulative
+
+    frame_track["speed_ms"] = frame_track["speed_ms"].interpolate().bfill().ffill()
+    frame_track["speed_ms"] = frame_track["speed_ms"].round(2)
+
+    replacements = frame_track.set_index("sequence_cnt")[["dist", "speed_ms", "trk_dist"]]
+    for column in replacements.columns:
+        df[column] = df["sequence_cnt"].map(replacements[column])
+
+
+def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius_m = 6_371_000.0
+    p1 = math.radians(float(lat1))
+    p2 = math.radians(float(lat2))
+    dp = math.radians(float(lat2) - float(lat1))
+    dl = math.radians(float(lon2) - float(lon1))
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * radius_m * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def write_binary_frames(sonar, samples_path: Path, frames_path: Path) -> int:
+    """Write synchronized frame metadata and raw uint16 sample payloads."""
+    df = sonar.header_dat.copy()
+    sample_col = "ping_cnt" if "ping_cnt" in df.columns else "sample_cnt"
+    frame_count = 0
+    offset = 0
+
+    with open(sonar.sonFile, "rb") as rsd, samples_path.open("wb") as samples, frames_path.open(
+        "w", encoding="utf-8"
+    ) as frames:
+        for sequence_count, group in df.groupby("sequence_cnt", sort=True):
+            channels = []
+
+            for _, row in group.sort_values("channel_id").iterrows():
+                try:
+                    sample_count = int(row[sample_col])
+                    byte_count = sample_count * 2
+                    data_size = int(row["data_size"])
+                    ping_header_len = int(row.get("ping_header_len", sonar.pingHeaderLen))
+                    son_offset = int(row["son_offset"])
+                    record_index = int(row["index"])
+                except (TypeError, ValueError):
+                    continue
+
+                if sample_count <= 0:
+                    continue
+                if son_offset < ping_header_len:
+                    continue
+                if son_offset + byte_count > ping_header_len + data_size:
+                    continue
+
+                rsd.seek(record_index + son_offset)
+                raw = rsd.read(byte_count)
+                if len(raw) != byte_count:
+                    continue
+
+                samples.write(raw)
+                channels.append(
+                    {
+                        "channelId": int(row["channel_id"]),
+                        "sampleOffset": offset,
+                        "sampleCount": sample_count,
+                        "byteLength": byte_count,
+                        "minRangeMeters": none_if_nan(row.get("min_range")),
+                        "maxRangeMeters": none_if_nan(row.get("max_range")),
+                        "bottomDepthMeters": none_if_nan(row.get("inst_dep_m")),
+                    }
+                )
+                offset += byte_count
+
+            if not channels:
+                continue
+
+            frame = {
+                "frameIndex": frame_count,
+                "sequenceCount": int(sequence_count),
+                "timeSeconds": float(group["time_s"].mean()),
+                "lat": none_if_nan(group["lat"].mean()),
+                "lon": none_if_nan(group["lon"].mean()),
+                "speedMetersPerSecond": none_if_nan(group["speed_ms"].mean()),
+                "trackDistanceMeters": none_if_nan(group["trk_dist"].mean()),
+                "headingDegrees": none_if_nan(group["instr_heading"].mean()),
+                "temperatureCelsius": none_if_nan(group["tempC"].mean()),
+                "channels": channels,
+            }
+            frames.write(json.dumps(frame, separators=(",", ":")) + "\n")
+            frame_count += 1
+
+    return frame_count
+
+
+def none_if_nan(value):
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(f) else f
 
 
 def relpath(path: Path, root: Path) -> str:

@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _timer;
     private readonly List<Rectangle> _timeCursors = new();
     private SonarRecording? _recording;
+    private IReadOnlyDictionary<int, BitmapSource> _rawChannelImages = new Dictionary<int, BitmapSource>();
     private DateTimeOffset _lastTick = DateTimeOffset.Now;
     private bool _isUpdatingSeek;
 
@@ -56,11 +57,13 @@ public partial class MainWindow : Window
     private void LoadRecording(string manifestPath)
     {
         _recording = ProcessedProjectLoader.Load(manifestPath);
+        _rawChannelImages = BinaryWaterfallRenderer.Render(_recording);
         _channels.Clear();
 
         foreach (var channel in _recording.Channels)
         {
-            var vm = new ChannelViewModel(channel);
+            _rawChannelImages.TryGetValue(channel.ChannelId, out var rawImage);
+            var vm = new ChannelViewModel(channel, rawImage);
             vm.PropertyChanged += Channel_PropertyChanged;
             _channels.Add(vm);
         }
@@ -69,7 +72,9 @@ public partial class MainWindow : Window
             ? Path.GetFileNameWithoutExtension(manifestPath)
             : Path.GetFileName(_recording.SourcePath);
 
-        RecordingTitle.Text = title;
+        RecordingTitle.Text = _rawChannelImages.Count > 0
+            ? $"{title}  | raw samples"
+            : $"{title}  | preview PNGs";
         EmptyViewerText.Visibility = _channels.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SeekSlider.Maximum = Math.Max(0, _recording.DurationSeconds);
         _playback.Seek(0, _recording.DurationSeconds);
@@ -341,11 +346,11 @@ public sealed class ChannelViewModel : INotifyPropertyChanged
     private bool _isVisible = true;
     private double _opacity = 1.0;
 
-    public ChannelViewModel(ChannelTrack channel)
+    public ChannelViewModel(ChannelTrack channel, BitmapSource? rawImage)
     {
         Channel = channel;
         Label = $"Channel {channel.ChannelId}";
-        Image = LoadRotatedImage(channel.WaterfallPath);
+        Image = rawImage ?? LoadRotatedPreviewImage(channel.WaterfallPath);
     }
 
     public ChannelTrack Channel { get; }
@@ -393,7 +398,7 @@ public sealed class ChannelViewModel : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    private static BitmapSource? LoadRotatedImage(string path)
+    private static BitmapSource? LoadRotatedPreviewImage(string path)
     {
         if (!File.Exists(path))
         {

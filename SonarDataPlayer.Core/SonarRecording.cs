@@ -3,7 +3,9 @@ namespace SonarDataPlayer.Core;
 public sealed record SonarRecording(
     string SourcePath,
     IReadOnlyList<ChannelTrack> Channels,
-    IReadOnlyList<PingTelemetry> Telemetry)
+    IReadOnlyList<PingTelemetry> Telemetry,
+    IReadOnlyList<SonarFrame> Frames,
+    string? SamplesPath)
 {
     public double DurationSeconds =>
         Telemetry.Count == 0 ? 0 : Telemetry[^1].TimeSeconds - Telemetry[0].TimeSeconds;

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace SonarDataPlayer.Core;
 
@@ -29,7 +30,57 @@ public static class ProcessedProjectLoader
                 c.TimeEnd))
             .ToArray();
 
-        return new SonarRecording(manifest.Source ?? string.Empty, channels, telemetry);
+        var samplesPath = Resolve(projectRoot, manifest.Samples?.Path);
+        var framesPath = Resolve(projectRoot, manifest.Frames);
+        var frames = File.Exists(framesPath)
+            ? LoadFrames(framesPath)
+            : Array.Empty<SonarFrame>();
+
+        return new SonarRecording(
+            manifest.Source ?? string.Empty,
+            channels,
+            telemetry,
+            frames,
+            File.Exists(samplesPath) ? samplesPath : null);
+    }
+
+    private static IReadOnlyList<SonarFrame> LoadFrames(string path)
+    {
+        var frames = new List<SonarFrame>();
+        foreach (var line in File.ReadLines(path))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var frame = JsonSerializer.Deserialize<FrameDto>(line, JsonOptions);
+            if (frame is null)
+            {
+                continue;
+            }
+
+            frames.Add(new SonarFrame(
+                frame.FrameIndex,
+                frame.SequenceCount,
+                frame.TimeSeconds,
+                frame.Lat,
+                frame.Lon,
+                frame.SpeedMetersPerSecond,
+                frame.TrackDistanceMeters,
+                frame.HeadingDegrees,
+                frame.TemperatureCelsius,
+                frame.Channels.Select(c => new ChannelSampleBlock(
+                    c.ChannelId,
+                    c.SampleOffset,
+                    c.SampleCount,
+                    c.ByteLength,
+                    c.MinRangeMeters,
+                    c.MaxRangeMeters,
+                    c.BottomDepthMeters)).ToArray()));
+        }
+
+        return frames.OrderBy(f => f.FrameIndex).ToArray();
     }
 
     private static IReadOnlyList<PingTelemetry> LoadTelemetryCsv(string path)
@@ -128,9 +179,14 @@ public static class ProcessedProjectLoader
     };
 
     private sealed record ProjectManifest(
+        int FormatVersion,
         string? Source,
         string? Telemetry,
+        string? Frames,
+        SamplesManifest? Samples,
         ChannelManifest[] Channels);
+
+    private sealed record SamplesManifest(string Path, string Encoding);
 
     private sealed record ChannelManifest(
         int ChannelId,
@@ -139,4 +195,25 @@ public static class ProcessedProjectLoader
         int MaxSamples,
         double TimeStart,
         double TimeEnd);
+
+    private sealed record FrameDto(
+        int FrameIndex,
+        int SequenceCount,
+        double TimeSeconds,
+        double? Lat,
+        double? Lon,
+        double? SpeedMetersPerSecond,
+        double? TrackDistanceMeters,
+        double? HeadingDegrees,
+        double? TemperatureCelsius,
+        ChannelBlockDto[] Channels);
+
+    private sealed record ChannelBlockDto(
+        int ChannelId,
+        long SampleOffset,
+        int SampleCount,
+        int ByteLength,
+        double? MinRangeMeters,
+        double? MaxRangeMeters,
+        double? BottomDepthMeters);
 }

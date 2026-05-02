@@ -86,6 +86,8 @@ The exporter writes:
 
 - `manifest.json`
 - `pings.csv`
+- `frames.jsonl`
+- `samples.u16le`
 - `channels\*_channel_*.png`
 
 The manual workflow is:
@@ -93,11 +95,16 @@ The manual workflow is:
 1. Parse the `.RSD` file.
 2. Export ping metadata to CSV.
 3. Extract raw 16-bit samples grouped by `channel_id`.
-4. Render one waterfall PNG per channel.
-5. Write a `manifest.json` that points to the CSV and PNGs.
-6. Open the manifest in SonarDataPlayer.
+4. Group channel records by Garmin `sequence_cnt` into synchronized ping frames.
+5. Write raw `uint16` channel arrays into `samples.u16le`.
+6. Write frame metadata and sample offsets into `frames.jsonl`.
+7. Render optional preview waterfall PNGs.
+8. Write a `manifest.json` that points to the CSV, frame index, sample blob, and PNGs.
+9. Open the manifest in SonarDataPlayer.
 
 This workflow keeps playback deployment simple while we finish porting the parser into C#.
+
+When `frames.jsonl` and `samples.u16le` are present, the app renders from raw samples with one shared intensity scale. PNGs are kept as preview/fallback assets.
 
 ## Planned Next Steps
 
