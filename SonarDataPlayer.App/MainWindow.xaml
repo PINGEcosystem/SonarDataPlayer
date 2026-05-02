@@ -1,0 +1,186 @@
+<Window x:Class="SonarDataPlayer.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Sonar Data Player"
+        Height="820"
+        MinHeight="620"
+        Width="1280"
+        MinWidth="980"
+        Background="#101318">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="56" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="92" />
+            <RowDefinition Height="104" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="#171B22" BorderBrush="#242B36" BorderThickness="0,0,0,1">
+            <DockPanel LastChildFill="True" Margin="16,0">
+                <Button DockPanel.Dock="Left"
+                        Width="124"
+                        Height="34"
+                        Margin="0,0,14,0"
+                        Click="OpenManifest_Click"
+                        Content="Open Project" />
+                <TextBlock x:Name="RecordingTitle"
+                           VerticalAlignment="Center"
+                           Foreground="#EEF2F7"
+                           FontSize="18"
+                           FontWeight="SemiBold"
+                           Text="No recording loaded" />
+                <StackPanel DockPanel.Dock="Right"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <RadioButton x:Name="StackedMode"
+                                 Content="Stacked"
+                                 Foreground="#D7DEE8"
+                                 IsChecked="True"
+                                 Margin="0,0,14,0" />
+                    <RadioButton Content="Overlay"
+                                 Foreground="#D7DEE8" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="280" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    BorderBrush="#2B3442"
+                    BorderThickness="1"
+                    Background="#05070A">
+                <Grid>
+                    <ItemsControl x:Name="ChannelList" Margin="8">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Columns="1" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,0,0,8"
+                                        BorderBrush="#253041"
+                                        BorderThickness="1"
+                                        Background="#080B10">
+                                    <Grid>
+                                        <Image Source="{Binding Image}"
+                                               Stretch="Fill"
+                                               Opacity="{Binding Opacity}" />
+                                        <Border HorizontalAlignment="Left"
+                                                VerticalAlignment="Top"
+                                                Background="#B0000000"
+                                                Padding="8,4">
+                                            <TextBlock Foreground="#F7FAFF"
+                                                       FontWeight="SemiBold"
+                                                       Text="{Binding Label}" />
+                                        </Border>
+                                        <Rectangle Height="2"
+                                                   VerticalAlignment="Center"
+                                                   Fill="#F7F0A6" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock x:Name="EmptyViewerText"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Foreground="#8E9AAD"
+                               FontSize="18"
+                               Text="Open a processed sonar project manifest to begin playback." />
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="1"
+                    Margin="14,0,0,0"
+                    Padding="14"
+                    BorderBrush="#2B3442"
+                    BorderThickness="1"
+                    Background="#151A21">
+                <StackPanel>
+                    <TextBlock Text="Channels"
+                               Foreground="#EEF2F7"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,10" />
+                    <ItemsControl x:Name="ChannelControls">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="82" />
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox Content="{Binding Label}"
+                                              Foreground="#D7DEE8"
+                                              IsChecked="{Binding IsVisible}" />
+                                    <Slider Grid.Column="1"
+                                            Minimum="0"
+                                            Maximum="1"
+                                            Value="{Binding Opacity}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="2" Background="#171B22" BorderBrush="#242B36" BorderThickness="0,1">
+            <Grid Margin="16,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="88" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="96" />
+                    <ColumnDefinition Width="120" />
+                </Grid.ColumnDefinitions>
+
+                <Button x:Name="PlayPauseButton"
+                        Width="72"
+                        Height="34"
+                        Click="PlayPause_Click"
+                        Content="Play" />
+                <Slider x:Name="SeekSlider"
+                        Grid.Column="1"
+                        Minimum="0"
+                        Maximum="1"
+                        ValueChanged="SeekSlider_ValueChanged"
+                        Margin="10,0" />
+                <ComboBox x:Name="RateSelector"
+                          Grid.Column="2"
+                          Height="32"
+                          SelectedIndex="2"
+                          SelectionChanged="RateSelector_SelectionChanged">
+                    <ComboBoxItem Content="0.25x" Tag="0.25" />
+                    <ComboBoxItem Content="0.5x" Tag="0.5" />
+                    <ComboBoxItem Content="1x" Tag="1" />
+                    <ComboBoxItem Content="2x" Tag="2" />
+                    <ComboBoxItem Content="4x" Tag="4" />
+                </ComboBox>
+                <TextBlock x:Name="TimeReadout"
+                           Grid.Column="3"
+                           VerticalAlignment="Center"
+                           Foreground="#D7DEE8"
+                           TextAlignment="Right"
+                           Text="0.0 / 0.0 s" />
+            </Grid>
+        </Border>
+
+        <UniformGrid Grid.Row="3"
+                     Columns="7"
+                     Margin="16,10">
+            <TextBlock x:Name="DepthReadout" Foreground="#EEF2F7" Text="Depth: -" />
+            <TextBlock x:Name="RangeReadout" Foreground="#EEF2F7" Text="Range: -" />
+            <TextBlock x:Name="PositionReadout" Foreground="#EEF2F7" Text="Position: -" />
+            <TextBlock x:Name="SpeedReadout" Foreground="#EEF2F7" Text="Speed: -" />
+            <TextBlock x:Name="HeadingReadout" Foreground="#EEF2F7" Text="Heading: -" />
+            <TextBlock x:Name="TempReadout" Foreground="#EEF2F7" Text="Temp: -" />
+            <TextBlock x:Name="PingReadout" Foreground="#EEF2F7" Text="Ping: -" />
+        </UniformGrid>
+    </Grid>
+</Window>
