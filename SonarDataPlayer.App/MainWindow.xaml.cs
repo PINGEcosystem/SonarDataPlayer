@@ -9,6 +9,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using SonarDataPlayer.Core;
+using Line = System.Windows.Shapes.Line;
 using Rectangle = System.Windows.Shapes.Rectangle;
 
 namespace SonarDataPlayer.App;
@@ -142,6 +143,7 @@ public partial class MainWindow : Window
     {
         _depthUnit = SelectedDepthUnit();
         _speedUnit = SelectedSpeedUnit();
+        RenderChannels();
         UpdateReadouts();
     }
 
@@ -309,6 +311,8 @@ public partial class MainWindow : Window
             });
         }
 
+        panel.Children.Add(CreateDepthGrid(null));
+
         var labels = new StackPanel
         {
             Orientation = Orientation.Vertical,
@@ -341,6 +345,8 @@ public partial class MainWindow : Window
             Stretch = Stretch.Fill,
             Opacity = channel.Opacity
         });
+
+        panel.Children.Add(CreateDepthGrid(channel.Channel.ChannelId));
 
         if (includeLabel)
         {
@@ -379,6 +385,101 @@ public partial class MainWindow : Window
 
         _timeCursors.Add(cursor);
         return cursor;
+    }
+
+    private Canvas CreateDepthGrid(int? channelId)
+    {
+        var canvas = new Canvas
+        {
+            IsHitTestVisible = false,
+            Tag = channelId
+        };
+        canvas.SizeChanged += DepthGrid_SizeChanged;
+        return canvas;
+    }
+
+    private void DepthGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (sender is Canvas canvas)
+        {
+            DrawDepthGrid(canvas);
+        }
+    }
+
+    private void DrawDepthGrid(Canvas canvas)
+    {
+        canvas.Children.Clear();
+        if (_recording is null || canvas.ActualHeight <= 0 || canvas.ActualWidth <= 0)
+        {
+            return;
+        }
+
+        var channelId = canvas.Tag as int?;
+        var maxDepthMeters = GetMaxRangeMeters(channelId);
+        if (maxDepthMeters <= 0)
+        {
+            return;
+        }
+
+        var (intervalMeters, suffix) = _depthUnit switch
+        {
+            DepthUnit.Feet => (10.0 / 3.280839895, "ft"),
+            DepthUnit.Fathoms => (1.8288, "fm"),
+            _ => (3.0, "m")
+        };
+
+        var intervalDisplay = _depthUnit switch
+        {
+            DepthUnit.Feet => 10.0,
+            DepthUnit.Fathoms => 1.0,
+            _ => 3.0
+        };
+
+        var stroke = new SolidColorBrush(Color.FromArgb(92, 255, 255, 255));
+        var textBrush = new SolidColorBrush(Color.FromArgb(210, 238, 242, 247));
+
+        for (var depthMeters = intervalMeters; depthMeters < maxDepthMeters; depthMeters += intervalMeters)
+        {
+            var y = (depthMeters / maxDepthMeters) * canvas.ActualHeight;
+            var line = new Line
+            {
+                X1 = 0,
+                X2 = canvas.ActualWidth,
+                Y1 = y,
+                Y2 = y,
+                Stroke = stroke,
+                StrokeThickness = 1
+            };
+            canvas.Children.Add(line);
+
+            var displayValue = (depthMeters / intervalMeters) * intervalDisplay;
+            var label = new TextBlock
+            {
+                Text = $"{displayValue:0} {suffix}",
+                Foreground = textBrush,
+                Background = new SolidColorBrush(Color.FromArgb(120, 0, 0, 0)),
+                FontSize = 11,
+                Padding = new Thickness(4, 1, 4, 1)
+            };
+            Canvas.SetLeft(label, 6);
+            Canvas.SetTop(label, Math.Max(0, y - 10));
+            canvas.Children.Add(label);
+        }
+    }
+
+    private double GetMaxRangeMeters(int? channelId)
+    {
+        if (_recording is null)
+        {
+            return 0;
+        }
+
+        return _recording.Frames
+            .SelectMany(frame => frame.Channels)
+            .Where(channel => channelId is null || channel.ChannelId == channelId)
+            .Select(channel => channel.MaximumRangeMeters ?? 0)
+            .DefaultIfEmpty(0)
+            .Max();
     }
 
     private void UpdateCursorPositions()
