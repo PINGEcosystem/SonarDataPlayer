@@ -36,8 +36,11 @@
                                  Content="Stacked"
                                  Foreground="#D7DEE8"
                                  IsChecked="True"
+                                 Checked="ViewMode_Checked"
                                  Margin="0,0,14,0" />
-                    <RadioButton Content="Overlay"
+                    <RadioButton x:Name="OverlayMode"
+                                 Content="Overlay"
+                                 Checked="ViewMode_Checked"
                                  Foreground="#D7DEE8" />
                 </StackPanel>
             </DockPanel>
@@ -54,38 +57,9 @@
                     BorderThickness="1"
                     Background="#05070A">
                 <Grid>
-                    <ItemsControl x:Name="ChannelList" Margin="8">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <UniformGrid Columns="1" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Margin="0,0,0,8"
-                                        BorderBrush="#253041"
-                                        BorderThickness="1"
-                                        Background="#080B10">
-                                    <Grid>
-                                        <Image Source="{Binding Image}"
-                                               Stretch="Fill"
-                                               Opacity="{Binding Opacity}" />
-                                        <Border HorizontalAlignment="Left"
-                                                VerticalAlignment="Top"
-                                                Background="#B0000000"
-                                                Padding="8,4">
-                                            <TextBlock Foreground="#F7FAFF"
-                                                       FontWeight="SemiBold"
-                                                       Text="{Binding Label}" />
-                                        </Border>
-                                        <Rectangle Height="2"
-                                                   VerticalAlignment="Center"
-                                                   Fill="#F7F0A6" />
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    <Grid x:Name="ViewerHost"
+                          Margin="8"
+                          SizeChanged="ViewerHost_SizeChanged" />
 
                     <TextBlock x:Name="EmptyViewerText"
                                HorizontalAlignment="Center"

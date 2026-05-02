@@ -4,10 +4,12 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using SonarDataPlayer.Core;
+using Rectangle = System.Windows.Shapes.Rectangle;
 
 namespace SonarDataPlayer.App;
 
@@ -16,6 +18,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<ChannelViewModel> _channels = new();
     private readonly PlaybackState _playback = new();
     private readonly DispatcherTimer _timer;
+    private readonly List<Rectangle> _timeCursors = new();
     private SonarRecording? _recording;
     private DateTimeOffset _lastTick = DateTimeOffset.Now;
     private bool _isUpdatingSeek;
@@ -24,7 +27,6 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        ChannelList.ItemsSource = _channels;
         ChannelControls.ItemsSource = _channels;
 
         _timer = new DispatcherTimer
@@ -58,7 +60,9 @@ public partial class MainWindow : Window
 
         foreach (var channel in _recording.Channels)
         {
-            _channels.Add(new ChannelViewModel(channel));
+            var vm = new ChannelViewModel(channel);
+            vm.PropertyChanged += Channel_PropertyChanged;
+            _channels.Add(vm);
         }
 
         var title = string.IsNullOrWhiteSpace(_recording.SourcePath)
@@ -69,7 +73,29 @@ public partial class MainWindow : Window
         EmptyViewerText.Visibility = _channels.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SeekSlider.Maximum = Math.Max(0, _recording.DurationSeconds);
         _playback.Seek(0, _recording.DurationSeconds);
+        RenderChannels();
         UpdateReadouts();
+    }
+
+    private void Channel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(ChannelViewModel.IsVisible) or nameof(ChannelViewModel.Opacity))
+        {
+            RenderChannels();
+        }
+    }
+
+    private void ViewMode_Checked(object sender, RoutedEventArgs e)
+    {
+        if (IsLoaded)
+        {
+            RenderChannels();
+        }
+    }
+
+    private void ViewerHost_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateCursorPositions();
     }
 
     private void PlayPause_Click(object sender, RoutedEventArgs e)
@@ -133,6 +159,7 @@ public partial class MainWindow : Window
         _isUpdatingSeek = false;
 
         TimeReadout.Text = $"{_playback.CurrentTimeSeconds:0.0} / {_recording.DurationSeconds:0.0} s";
+        UpdateCursorPositions();
 
         var ping = _recording.FindNearestTelemetry(_playback.CurrentTimeSeconds);
         if (ping is null)
@@ -153,6 +180,160 @@ public partial class MainWindow : Window
     {
         return value.HasValue ? value.Value.ToString(format) : "-";
     }
+
+    private void RenderChannels()
+    {
+        ViewerHost.Children.Clear();
+        ViewerHost.RowDefinitions.Clear();
+        _timeCursors.Clear();
+
+        if (_recording is null)
+        {
+            return;
+        }
+
+        var visibleChannels = _channels.Where(c => c.IsVisible && c.Image is not null).ToArray();
+        EmptyViewerText.Visibility = visibleChannels.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (visibleChannels.Length == 0)
+        {
+            return;
+        }
+
+        if (OverlayMode.IsChecked == true)
+        {
+            RenderOverlay(visibleChannels);
+        }
+        else
+        {
+            RenderStacked(visibleChannels);
+        }
+
+        UpdateCursorPositions();
+    }
+
+    private void RenderStacked(IReadOnlyList<ChannelViewModel> channels)
+    {
+        for (var i = 0; i < channels.Count; i++)
+        {
+            ViewerHost.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var panel = CreateChannelPanel(channels[i], includeLabel: true);
+            panel.Margin = new Thickness(0, 0, 0, i == channels.Count - 1 ? 0 : 8);
+            Grid.SetRow(panel, i);
+            ViewerHost.Children.Add(panel);
+        }
+    }
+
+    private void RenderOverlay(IReadOnlyList<ChannelViewModel> channels)
+    {
+        ViewerHost.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        var panel = new Grid
+        {
+            ClipToBounds = true,
+            Background = Brushes.Black
+        };
+
+        foreach (var channel in channels)
+        {
+            panel.Children.Add(new Image
+            {
+                Source = channel.Image,
+                Stretch = Stretch.Fill,
+                Opacity = channel.Opacity
+            });
+        }
+
+        var labels = new StackPanel
+        {
+            Orientation = Orientation.Vertical,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(8)
+        };
+
+        foreach (var channel in channels)
+        {
+            labels.Children.Add(CreateLabel(channel.Label));
+        }
+
+        panel.Children.Add(labels);
+        panel.Children.Add(CreateCursor());
+        ViewerHost.Children.Add(panel);
+    }
+
+    private Grid CreateChannelPanel(ChannelViewModel channel, bool includeLabel)
+    {
+        var panel = new Grid
+        {
+            ClipToBounds = true,
+            Background = Brushes.Black
+        };
+
+        panel.Children.Add(new Image
+        {
+            Source = channel.Image,
+            Stretch = Stretch.Fill,
+            Opacity = channel.Opacity
+        });
+
+        if (includeLabel)
+        {
+            panel.Children.Add(CreateLabel(channel.Label));
+        }
+
+        panel.Children.Add(CreateCursor());
+        return panel;
+    }
+
+    private Border CreateLabel(string label)
+    {
+        return new Border
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Background = new SolidColorBrush(Color.FromArgb(176, 0, 0, 0)),
+            Padding = new Thickness(8, 4, 8, 4),
+            Child = new TextBlock
+            {
+                Foreground = Brushes.White,
+                FontWeight = FontWeights.SemiBold,
+                Text = label
+            }
+        };
+    }
+
+    private Rectangle CreateCursor()
+    {
+        var cursor = new Rectangle
+        {
+            Width = 2,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Fill = new SolidColorBrush(Color.FromRgb(255, 239, 132))
+        };
+
+        _timeCursors.Add(cursor);
+        return cursor;
+    }
+
+    private void UpdateCursorPositions()
+    {
+        if (_recording is null || _recording.DurationSeconds <= 0)
+        {
+            return;
+        }
+
+        var t = Math.Clamp(_playback.CurrentTimeSeconds / _recording.DurationSeconds, 0, 1);
+        foreach (var cursor in _timeCursors)
+        {
+            if (cursor.Parent is not FrameworkElement parent || parent.ActualWidth <= 0)
+            {
+                continue;
+            }
+
+            cursor.Margin = new Thickness((parent.ActualWidth - cursor.Width) * t, 0, 0, 0);
+        }
+    }
 }
 
 public sealed class ChannelViewModel : INotifyPropertyChanged
@@ -164,16 +345,14 @@ public sealed class ChannelViewModel : INotifyPropertyChanged
     {
         Channel = channel;
         Label = $"Channel {channel.ChannelId}";
-        Image = File.Exists(channel.WaterfallPath)
-            ? new BitmapImage(new Uri(channel.WaterfallPath))
-            : null;
+        Image = LoadRotatedImage(channel.WaterfallPath);
     }
 
     public ChannelTrack Channel { get; }
 
     public string Label { get; }
 
-    public BitmapImage? Image { get; }
+    public BitmapSource? Image { get; }
 
     public bool IsVisible
     {
@@ -212,5 +391,22 @@ public sealed class ChannelViewModel : INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    private static BitmapSource? LoadRotatedImage(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.UriSource = new Uri(path);
+        image.Rotation = Rotation.Rotate90;
+        image.EndInit();
+        image.Freeze();
+        return image;
     }
 }
