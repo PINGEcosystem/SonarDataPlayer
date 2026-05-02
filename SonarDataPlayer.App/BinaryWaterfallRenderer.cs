@@ -28,6 +28,13 @@ public static class BinaryWaterfallRenderer
                 .Select(c => c.SampleCount)
                 .DefaultIfEmpty(0)
                 .Max());
+        var maxRangeByChannel = channelIds.ToDictionary(
+            id => id,
+            id => recording.Frames
+                .SelectMany(f => f.Channels.Where(c => c.ChannelId == id))
+                .Select(c => c.MaximumRangeMeters ?? 0)
+                .DefaultIfEmpty(0)
+                .Max());
 
         var logMax = FindGlobalLogMax(recording);
         if (logMax <= 0)
@@ -51,7 +58,16 @@ public static class BinaryWaterfallRenderer
                 var block = frame.Channels.FirstOrDefault(c => c.ChannelId == channelId);
                 if (block is not null)
                 {
-                    FillColumn(stream, block, pixels, x, width, height, logMax, palette);
+                    FillColumn(
+                        stream,
+                        block,
+                        pixels,
+                        x,
+                        width,
+                        height,
+                        maxRangeByChannel[channelId],
+                        logMax,
+                        palette);
                 }
 
                 x++;
@@ -118,6 +134,7 @@ public static class BinaryWaterfallRenderer
         int x,
         int width,
         int height,
+        double displayMaxRangeMeters,
         double logMax,
         IReadOnlyList<RgbColor> palette)
     {
@@ -129,15 +146,28 @@ public static class BinaryWaterfallRenderer
             return;
         }
 
-        var count = Math.Min(block.SampleCount, height);
-        for (var sample = 0; sample < count; sample++)
+        var minRange = block.MinimumRangeMeters ?? 0;
+        var maxRange = block.MaximumRangeMeters ?? displayMaxRangeMeters;
+        if (displayMaxRangeMeters <= 0 || maxRange <= minRange || block.SampleCount <= 1)
         {
+            return;
+        }
+
+        for (var y = 0; y < height; y++)
+        {
+            var depthMeters = height <= 1 ? 0 : (y / (double)(height - 1)) * displayMaxRangeMeters;
+            if (depthMeters < minRange || depthMeters > maxRange)
+            {
+                continue;
+            }
+
+            var samplePosition = ((depthMeters - minRange) / (maxRange - minRange)) * (block.SampleCount - 1);
+            var sample = Math.Clamp((int)Math.Round(samplePosition), 0, block.SampleCount - 1);
             var rawIndex = sample * 2;
             var value = (ushort)(raw[rawIndex] | (raw[rawIndex + 1] << 8));
             var paletteIndex = Math.Clamp((int)Math.Round((Math.Log(1 + value) / logMax) * 255), 0, 255);
             var color = palette[paletteIndex];
 
-            var y = sample;
             var pixelIndex = ((y * width) + x) * 4;
             pixels[pixelIndex] = color.B;
             pixels[pixelIndex + 1] = color.G;

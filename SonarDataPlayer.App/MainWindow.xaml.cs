@@ -465,6 +465,42 @@ public partial class MainWindow : Window
             Canvas.SetTop(label, Math.Max(0, y - 10));
             canvas.Children.Add(label);
         }
+
+        DrawBottomTrace(canvas, channelId, maxDepthMeters);
+    }
+
+    private void DrawBottomTrace(Canvas canvas, int? channelId, double maxDepthMeters)
+    {
+        if (_recording is null || channelId is null || _recording.Frames.Count < 2)
+        {
+            return;
+        }
+
+        var points = new PointCollection();
+        for (var i = 0; i < _recording.Frames.Count; i++)
+        {
+            var block = _recording.Frames[i].Channels.FirstOrDefault(c => c.ChannelId == channelId.Value);
+            if (block?.BottomDepthMeters is not { } bottom || bottom <= 0)
+            {
+                continue;
+            }
+
+            var x = (_recording.Frames.Count <= 1 ? 0 : i / (double)(_recording.Frames.Count - 1)) * canvas.ActualWidth;
+            var y = Math.Clamp((bottom / maxDepthMeters) * canvas.ActualHeight, 0, canvas.ActualHeight);
+            points.Add(new Point(x, y));
+        }
+
+        if (points.Count < 2)
+        {
+            return;
+        }
+
+        canvas.Children.Add(new System.Windows.Shapes.Polyline
+        {
+            Points = points,
+            Stroke = new SolidColorBrush(Color.FromArgb(210, 255, 210, 86)),
+            StrokeThickness = 1.5
+        });
     }
 
     private double GetMaxRangeMeters(int? channelId)
