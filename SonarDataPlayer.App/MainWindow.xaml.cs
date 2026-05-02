@@ -23,6 +23,8 @@ public partial class MainWindow : Window
     private IReadOnlyDictionary<int, BitmapSource> _rawChannelImages = new Dictionary<int, BitmapSource>();
     private DateTimeOffset _lastTick = DateTimeOffset.Now;
     private bool _isUpdatingSeek;
+    private DepthUnit _depthUnit = DepthUnit.Meters;
+    private SpeedUnit _speedUnit = SpeedUnit.Mph;
 
     public MainWindow()
     {
@@ -136,6 +138,13 @@ public partial class MainWindow : Window
         }
     }
 
+    private void UnitSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _depthUnit = SelectedDepthUnit();
+        _speedUnit = SelectedSpeedUnit();
+        UpdateReadouts();
+    }
+
     private void Timer_Tick(object? sender, EventArgs e)
     {
         var now = DateTimeOffset.Now;
@@ -172,10 +181,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        DepthReadout.Text = $"Depth: {Format(ping.DepthMeters, "0.0 m")}";
-        RangeReadout.Text = $"Range: {Format(ping.MinimumRangeMeters, "0.0")} - {Format(ping.MaximumRangeMeters, "0.0 m")}";
+        DepthReadout.Text = $"Depth: {FormatDepth(ping.DepthMeters)}";
+        RangeReadout.Text = $"Range: {FormatDepth(ping.MinimumRangeMeters)} - {FormatDepth(ping.MaximumRangeMeters)}";
         PositionReadout.Text = $"Position: {Format(ping.Latitude, "0.000000")}, {Format(ping.Longitude, "0.000000")}";
-        SpeedReadout.Text = $"Speed: {Format(ping.SpeedMetersPerSecond, "0.0 m/s")}";
+        SpeedReadout.Text = $"Speed: {FormatSpeed(ping.SpeedMetersPerSecond)}";
         HeadingReadout.Text = $"Heading: {Format(ping.HeadingDegrees, "0")} deg";
         TempReadout.Text = $"Temp: {Format(ping.TemperatureCelsius, "0.0 C")}";
         PingReadout.Text = $"Ping: {ping.RecordNumber}  Ch: {ping.ChannelId}  Samples: {ping.SampleCount}";
@@ -184,6 +193,57 @@ public partial class MainWindow : Window
     private static string Format(double? value, string format)
     {
         return value.HasValue ? value.Value.ToString(format) : "-";
+    }
+
+    private string FormatDepth(double? meters)
+    {
+        if (!meters.HasValue)
+        {
+            return "-";
+        }
+
+        var (value, suffix) = _depthUnit switch
+        {
+            DepthUnit.Feet => (meters.Value * 3.280839895, "ft"),
+            DepthUnit.Fathoms => (meters.Value / 1.8288, "fm"),
+            _ => (meters.Value, "m")
+        };
+
+        return $"{value:0.0} {suffix}";
+    }
+
+    private string FormatSpeed(double? metersPerSecond)
+    {
+        if (!metersPerSecond.HasValue)
+        {
+            return "-";
+        }
+
+        var (value, suffix) = _speedUnit switch
+        {
+            SpeedUnit.Knots => (metersPerSecond.Value * 1.943844492, "kt"),
+            _ => (metersPerSecond.Value * 2.236936292, "mph")
+        };
+
+        return $"{value:0.0} {suffix}";
+    }
+
+    private DepthUnit SelectedDepthUnit()
+    {
+        return DepthUnitSelector?.SelectedItem is ComboBoxItem item &&
+               item.Tag is string tag &&
+               Enum.TryParse<DepthUnit>(tag, out var unit)
+            ? unit
+            : DepthUnit.Meters;
+    }
+
+    private SpeedUnit SelectedSpeedUnit()
+    {
+        return SpeedUnitSelector?.SelectedItem is ComboBoxItem item &&
+               item.Tag is string tag &&
+               Enum.TryParse<SpeedUnit>(tag, out var unit)
+            ? unit
+            : SpeedUnit.Mph;
     }
 
     private void RenderChannels()
@@ -414,4 +474,17 @@ public sealed class ChannelViewModel : INotifyPropertyChanged
         image.Freeze();
         return image;
     }
+}
+
+public enum DepthUnit
+{
+    Feet,
+    Meters,
+    Fathoms
+}
+
+public enum SpeedUnit
+{
+    Mph,
+    Knots
 }

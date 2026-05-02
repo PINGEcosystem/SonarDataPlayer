@@ -101,6 +101,38 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+
+                    <Separator Margin="0,12,0,14" Background="#2B3442" />
+
+                    <TextBlock Text="Units"
+                               Foreground="#EEF2F7"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,10" />
+
+                    <TextBlock Text="Depth"
+                               Foreground="#8E9AAD"
+                               Margin="0,0,0,4" />
+                    <ComboBox x:Name="DepthUnitSelector"
+                              Height="32"
+                              SelectedIndex="1"
+                              SelectionChanged="UnitSelector_SelectionChanged"
+                              Margin="0,0,0,10">
+                        <ComboBoxItem Content="Feet" Tag="Feet" />
+                        <ComboBoxItem Content="Meters" Tag="Meters" />
+                        <ComboBoxItem Content="Fathoms" Tag="Fathoms" />
+                    </ComboBox>
+
+                    <TextBlock Text="Speed"
+                               Foreground="#8E9AAD"
+                               Margin="0,0,0,4" />
+                    <ComboBox x:Name="SpeedUnitSelector"
+                              Height="32"
+                              SelectedIndex="0"
+                              SelectionChanged="UnitSelector_SelectionChanged">
+                        <ComboBoxItem Content="MPH" Tag="Mph" />
+                        <ComboBoxItem Content="Knots" Tag="Knots" />
+                    </ComboBox>
                 </StackPanel>
             </Border>
         </Grid>
