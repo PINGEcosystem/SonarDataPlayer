@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     private readonly PlaybackState _playback = new();
     private readonly DispatcherTimer _timer;
     private readonly List<Image> _sonarImages = new();
+    private readonly List<Canvas> _depthGrids = new();
     private readonly List<Rectangle> _timeCursors = new();
     private readonly List<TextBlock> _cursorTimeLabels = new();
     private TextBlock? _viewerDepthReadout;
@@ -375,6 +376,7 @@ public partial class MainWindow : Window
         ViewerHost.Children.Clear();
         ViewerHost.RowDefinitions.Clear();
         _sonarImages.Clear();
+        _depthGrids.Clear();
         _timeCursors.Clear();
         _cursorTimeLabels.Clear();
         _viewerDepthReadout = null;
@@ -599,6 +601,7 @@ public partial class MainWindow : Window
             Tag = channelId
         };
         canvas.SizeChanged += DepthGrid_SizeChanged;
+        _depthGrids.Add(canvas);
         return canvas;
     }
 
@@ -681,15 +684,23 @@ public partial class MainWindow : Window
         }
 
         var points = new PointCollection();
+        var (visibleStart, visibleDuration) = GetVisibleTimeWindow();
+        var visibleEnd = visibleStart + visibleDuration;
         for (var i = 0; i < _recording.Frames.Count; i++)
         {
+            var frame = _recording.Frames[i];
+            if (frame.TimeSeconds < visibleStart || frame.TimeSeconds > visibleEnd)
+            {
+                continue;
+            }
+
             var block = _recording.Frames[i].Channels.FirstOrDefault(c => c.ChannelId == channelId.Value);
             if (block?.BottomDepthMeters is not { } bottom || bottom <= 0)
             {
                 continue;
             }
 
-            var x = (_recording.Frames.Count <= 1 ? 0 : i / (double)(_recording.Frames.Count - 1)) * canvas.ActualWidth;
+            var x = ((frame.TimeSeconds - visibleStart) / visibleDuration) * canvas.ActualWidth;
             var y = Math.Clamp((bottom / maxDepthMeters) * canvas.ActualHeight, 0, canvas.ActualHeight);
             points.Add(new Point(x, y));
         }
@@ -783,6 +794,11 @@ public partial class MainWindow : Window
             var left = -(visibleStart / _recording.DurationSeconds) * imageWidth;
             image.Width = imageWidth;
             image.Margin = new Thickness(left, 0, 0, 0);
+        }
+
+        foreach (var grid in _depthGrids)
+        {
+            DrawDepthGrid(grid);
         }
     }
 

@@ -1,7 +1,7 @@
 <Window x:Class="SonarDataPlayer.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Sonar Data Player v0.1.6"
+        Title="Sonar Data Player v0.1.7"
         Height="820"
         MinHeight="620"
         Width="1280"
@@ -32,7 +32,7 @@
                 <StackPanel DockPanel.Dock="Right"
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
-                    <TextBlock Text="v0.1.6"
+                    <TextBlock Text="v0.1.7"
                                Foreground="#8E9AAD"
                                VerticalAlignment="Center"
                                Margin="0,0,18,0" />
