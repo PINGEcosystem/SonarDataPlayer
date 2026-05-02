@@ -415,7 +415,7 @@ public partial class MainWindow : Window
         }
 
         var channelId = canvas.Tag as int?;
-        var maxDepthMeters = GetMaxRangeMeters(channelId);
+        var maxDepthMeters = GetMaxRangeMeters();
         if (maxDepthMeters <= 0)
         {
             return;
@@ -503,7 +503,7 @@ public partial class MainWindow : Window
         });
     }
 
-    private double GetMaxRangeMeters(int? channelId)
+    private double GetMaxRangeMeters()
     {
         if (_recording is null)
         {
@@ -512,7 +512,6 @@ public partial class MainWindow : Window
 
         return _recording.Frames
             .SelectMany(frame => frame.Channels)
-            .Where(channel => channelId is null || channel.ChannelId == channelId)
             .Select(channel => channel.MaximumRangeMeters ?? 0)
             .DefaultIfEmpty(0)
             .Max();

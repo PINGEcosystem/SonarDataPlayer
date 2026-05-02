@@ -28,13 +28,11 @@ public static class BinaryWaterfallRenderer
                 .Select(c => c.SampleCount)
                 .DefaultIfEmpty(0)
                 .Max());
-        var maxRangeByChannel = channelIds.ToDictionary(
-            id => id,
-            id => recording.Frames
-                .SelectMany(f => f.Channels.Where(c => c.ChannelId == id))
-                .Select(c => c.MaximumRangeMeters ?? 0)
-                .DefaultIfEmpty(0)
-                .Max());
+        var displayMaxRangeMeters = recording.Frames
+            .SelectMany(f => f.Channels)
+            .Select(c => c.MaximumRangeMeters ?? 0)
+            .DefaultIfEmpty(0)
+            .Max();
 
         var logMax = FindGlobalLogMax(recording);
         if (logMax <= 0)
@@ -65,7 +63,7 @@ public static class BinaryWaterfallRenderer
                         x,
                         width,
                         height,
-                        maxRangeByChannel[channelId],
+                        displayMaxRangeMeters,
                         logMax,
                         palette);
                 }
