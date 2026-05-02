@@ -656,7 +656,7 @@ public partial class MainWindow : Window
 
             label.Text = labelText;
             label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            var left = ((parent.ActualWidth - 2) * t) + 6;
+            var left = (parent.ActualWidth - label.DesiredSize.Width) / 2.0;
             var maxLeft = Math.Max(0, parent.ActualWidth - label.DesiredSize.Width);
             label.Margin = new Thickness(Math.Clamp(left, 0, maxLeft), 0, 0, 4);
         }
