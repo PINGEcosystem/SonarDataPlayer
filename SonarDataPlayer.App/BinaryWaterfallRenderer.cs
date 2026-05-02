@@ -8,7 +8,7 @@ namespace SonarDataPlayer.App;
 
 public static class BinaryWaterfallRenderer
 {
-    public static IReadOnlyDictionary<int, BitmapSource> Render(SonarRecording recording)
+    public static IReadOnlyDictionary<int, BitmapSource> Render(SonarRecording recording, double? displayMaxRangeMeters = null)
     {
         if (recording.SamplesPath is null || recording.Frames.Count == 0)
         {
@@ -28,11 +28,12 @@ public static class BinaryWaterfallRenderer
                 .Select(c => c.SampleCount)
                 .DefaultIfEmpty(0)
                 .Max());
-        var displayMaxRangeMeters = recording.Frames
+        var autoMaxRangeMeters = recording.Frames
             .SelectMany(f => f.Channels)
             .Select(c => c.MaximumRangeMeters ?? 0)
             .DefaultIfEmpty(0)
             .Max();
+        var renderMaxRangeMeters = displayMaxRangeMeters ?? autoMaxRangeMeters;
 
         var logMax = FindGlobalLogMax(recording);
         if (logMax <= 0)
@@ -63,7 +64,7 @@ public static class BinaryWaterfallRenderer
                         x,
                         width,
                         height,
-                        displayMaxRangeMeters,
+                        renderMaxRangeMeters,
                         logMax,
                         palette);
                 }

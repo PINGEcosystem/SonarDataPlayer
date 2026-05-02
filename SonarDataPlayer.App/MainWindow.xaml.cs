@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private TextBlock? _viewerTempReadout;
     private SonarRecording? _recording;
     private IReadOnlyDictionary<int, BitmapSource> _rawChannelImages = new Dictionary<int, BitmapSource>();
+    private double? _manualMaxDepthMeters;
     private DateTimeOffset _lastTick = DateTimeOffset.Now;
     private bool _isUpdatingSeek;
     private DepthUnit _depthUnit = DepthUnit.Meters;
@@ -67,7 +68,8 @@ public partial class MainWindow : Window
     private void LoadRecording(string manifestPath)
     {
         _recording = ProcessedProjectLoader.Load(manifestPath);
-        _rawChannelImages = BinaryWaterfallRenderer.Render(_recording);
+        _manualMaxDepthMeters = null;
+        RenderRawChannelImages();
         _channels.Clear();
 
         foreach (var channel in _recording.Channels)
@@ -162,6 +164,42 @@ public partial class MainWindow : Window
         _zoomWindowSeconds = SelectedZoomWindowSeconds();
         UpdateImageViewports();
         UpdateCursorPositions();
+    }
+
+    private void DepthZoomIn_Click(object sender, RoutedEventArgs e)
+    {
+        if (_recording is null)
+        {
+            return;
+        }
+
+        var current = GetDisplayMaxRangeMeters();
+        _manualMaxDepthMeters = Math.Max(3.0, current * 0.8);
+        RebuildDepthScaledView();
+    }
+
+    private void DepthZoomOut_Click(object sender, RoutedEventArgs e)
+    {
+        if (_recording is null)
+        {
+            return;
+        }
+
+        var auto = GetAutoMaxRangeMeters();
+        var current = GetDisplayMaxRangeMeters();
+        _manualMaxDepthMeters = Math.Min(auto, current * 1.25);
+        RebuildDepthScaledView();
+    }
+
+    private void DepthZoomAuto_Click(object sender, RoutedEventArgs e)
+    {
+        if (_recording is null)
+        {
+            return;
+        }
+
+        _manualMaxDepthMeters = null;
+        RebuildDepthScaledView();
     }
 
     private void Timer_Tick(object? sender, EventArgs e)
@@ -367,6 +405,26 @@ public partial class MainWindow : Window
         UpdateCursorPositions();
     }
 
+    private void RebuildDepthScaledView()
+    {
+        RenderRawChannelImages();
+        foreach (var channel in _channels)
+        {
+            _rawChannelImages.TryGetValue(channel.Channel.ChannelId, out var rawImage);
+            channel.SetImage(rawImage ?? ChannelViewModel.LoadRotatedPreviewImage(channel.Channel.WaterfallPath));
+        }
+
+        RenderChannels();
+        UpdateReadouts();
+    }
+
+    private void RenderRawChannelImages()
+    {
+        _rawChannelImages = _recording is null
+            ? new Dictionary<int, BitmapSource>()
+            : BinaryWaterfallRenderer.Render(_recording, _manualMaxDepthMeters);
+    }
+
     private void RenderStacked(IReadOnlyList<ChannelViewModel> channels)
     {
         for (var i = 0; i < channels.Count; i++)
@@ -561,7 +619,7 @@ public partial class MainWindow : Window
         }
 
         var channelId = canvas.Tag as int?;
-        var maxDepthMeters = GetMaxRangeMeters();
+        var maxDepthMeters = GetDisplayMaxRangeMeters();
         if (maxDepthMeters <= 0)
         {
             return;
@@ -649,7 +707,12 @@ public partial class MainWindow : Window
         });
     }
 
-    private double GetMaxRangeMeters()
+    private double GetDisplayMaxRangeMeters()
+    {
+        return _manualMaxDepthMeters ?? GetAutoMaxRangeMeters();
+    }
+
+    private double GetAutoMaxRangeMeters()
     {
         if (_recording is null)
         {
@@ -745,19 +808,33 @@ public sealed class ChannelViewModel : INotifyPropertyChanged
 {
     private bool _isVisible = true;
     private double _opacity = 1.0;
+    private BitmapSource? _image;
 
     public ChannelViewModel(ChannelTrack channel, BitmapSource? rawImage)
     {
         Channel = channel;
         Label = $"Channel {channel.ChannelId}";
-        Image = rawImage ?? LoadRotatedPreviewImage(channel.WaterfallPath);
+        _image = rawImage ?? LoadRotatedPreviewImage(channel.WaterfallPath);
     }
 
     public ChannelTrack Channel { get; }
 
     public string Label { get; }
 
-    public BitmapSource? Image { get; }
+    public BitmapSource? Image
+    {
+        get => _image;
+        private set
+        {
+            _image = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public void SetImage(BitmapSource? image)
+    {
+        Image = image;
+    }
 
     public bool IsVisible
     {
@@ -798,7 +875,7 @@ public sealed class ChannelViewModel : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    private static BitmapSource? LoadRotatedPreviewImage(string path)
+    public static BitmapSource? LoadRotatedPreviewImage(string path)
     {
         if (!File.Exists(path))
         {
