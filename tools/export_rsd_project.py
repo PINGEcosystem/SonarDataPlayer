@@ -75,6 +75,11 @@ def main() -> int:
     channels = []
     for channel_id, png_path in sorted(waterfall_paths.items()):
         group = sonar.header_dat[sonar.header_dat["channel_id"] == channel_id]
+        channel_info = next(
+            (c for c in getattr(sonar, "channel_info", []) if int(c.get("channel_id", -1)) == int(channel_id)),
+            {},
+        )
+        channel_label = describe_channel(int(channel_id), group, channel_info)
         sample_col = "ping_cnt" if "ping_cnt" in group.columns else "sample_cnt"
         max_samples = int(group[sample_col].max()) if len(group) else 0
         time_start = float(group["time_s"].min()) if len(group) else 0.0
@@ -83,6 +88,12 @@ def main() -> int:
         channels.append(
             {
                 "channelId": int(channel_id),
+                "label": channel_label["label"],
+                "mode": channel_label["mode"],
+                "orientation": channel_label["orientation"],
+                "beam": channel_label["beam"],
+                "startFrequencyHz": channel_label["startFrequencyHz"],
+                "endFrequencyHz": channel_label["endFrequencyHz"],
                 "waterfall": relpath(Path(png_path), output_dir),
                 "rows": int(len(group)),
                 "maxSamples": max_samples,
@@ -111,6 +122,54 @@ def main() -> int:
     print(f"Frames: {frame_count}")
     print(f"Channels: {', '.join(str(c['channelId']) for c in channels)}")
     return 0
+
+
+def describe_channel(channel_id: int, group, channel_info: dict) -> dict:
+    beam = int(group["beam"].mode().iloc[0]) if "beam" in group and len(group["beam"].dropna()) else None
+    start_hz = int(channel_info.get("start_freq_hz", 0) or 0)
+    end_hz = int(channel_info.get("end_freq_hz", 0) or 0)
+
+    orientation = None
+    mode = "Unknown"
+
+    if beam == 1:
+        mode = "Traditional CHIRP"
+    elif beam == 4:
+        mode = "Down Imaging"
+    elif beam in (2, 3):
+        mode = "SideVu"
+        port_star = group["port_star_id"].median() if "port_star_id" in group else None
+        if port_star is not None and port_star < 0:
+            orientation = "Port"
+        elif port_star is not None and port_star > 0:
+            orientation = "Starboard"
+        elif beam == 2:
+            orientation = "Port"
+        elif beam == 3:
+            orientation = "Starboard"
+
+    freq = format_frequency_range(start_hz, end_hz)
+    label_parts = [mode]
+    if orientation:
+        label_parts.append(orientation)
+    if freq:
+        label_parts.append(freq)
+
+    return {
+        "label": " ".join(label_parts) if label_parts else f"Channel {channel_id}",
+        "mode": mode,
+        "orientation": orientation,
+        "beam": beam,
+        "startFrequencyHz": start_hz or None,
+        "endFrequencyHz": end_hz or None,
+    }
+
+
+def format_frequency_range(start_hz: int, end_hz: int) -> str | None:
+    if start_hz <= 0 or end_hz <= 0:
+        return None
+
+    return f"{start_hz / 1000:.0f}-{end_hz / 1000:.0f} kHz"
 
 
 def recompute_track_speed(df) -> None:

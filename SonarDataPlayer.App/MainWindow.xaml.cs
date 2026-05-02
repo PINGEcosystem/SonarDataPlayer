@@ -813,7 +813,7 @@ public sealed class ChannelViewModel : INotifyPropertyChanged
     public ChannelViewModel(ChannelTrack channel, BitmapSource? rawImage)
     {
         Channel = channel;
-        Label = $"Channel {channel.ChannelId}";
+        Label = $"{channel.Label} ({channel.ChannelId})";
         _image = rawImage ?? LoadRotatedPreviewImage(channel.WaterfallPath);
     }
 

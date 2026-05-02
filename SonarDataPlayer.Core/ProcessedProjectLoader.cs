@@ -23,6 +23,12 @@ public static class ProcessedProjectLoader
         var channels = manifest.Channels
             .Select(c => new ChannelTrack(
                 c.ChannelId,
+                c.Label ?? $"Channel {c.ChannelId}",
+                c.Mode ?? "Unknown",
+                c.Orientation,
+                c.Beam,
+                c.StartFrequencyHz,
+                c.EndFrequencyHz,
                 Resolve(projectRoot, c.Waterfall),
                 c.Rows,
                 c.MaxSamples,
@@ -211,6 +217,12 @@ public static class ProcessedProjectLoader
 
     private sealed record ChannelManifest(
         int ChannelId,
+        string? Label,
+        string? Mode,
+        string? Orientation,
+        int? Beam,
+        int? StartFrequencyHz,
+        int? EndFrequencyHz,
         string Waterfall,
         int Rows,
         int MaxSamples,

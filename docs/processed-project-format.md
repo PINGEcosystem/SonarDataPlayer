@@ -21,6 +21,12 @@ Create a `manifest.json` file beside the generated frame metadata, raw samples, 
   "channels": [
     {
       "channelId": 1785,
+      "label": "Traditional CHIRP 140-240 kHz",
+      "mode": "Traditional CHIRP",
+      "orientation": null,
+      "beam": 1,
+      "startFrequencyHz": 140000,
+      "endFrequencyHz": 240000,
       "waterfall": "channels/1785/waterfall.png",
       "rows": 309,
       "maxSamples": 2048,
