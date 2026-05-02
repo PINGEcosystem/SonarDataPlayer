@@ -201,7 +201,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        DateTimeReadout.Text = $"Time: {FormatLocalTime(ping.TimestampUtc)}";
         DepthReadout.Text = $"Depth: {FormatDepth(ping.DepthMeters)}";
         RangeReadout.Text = $"Range: {FormatDepth(ping.MinimumRangeMeters)} - {FormatDepth(ping.MaximumRangeMeters)}";
         PositionReadout.Text = $"Position: {Format(ping.Latitude, "0.000000")}, {Format(ping.Longitude, "0.000000")}";
