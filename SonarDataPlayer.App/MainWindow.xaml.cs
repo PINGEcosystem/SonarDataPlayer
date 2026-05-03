@@ -41,6 +41,8 @@ public partial class MainWindow : Window
     private SonarRecording? _recording;
     private IReadOnlyDictionary<int, BitmapSource> _rawChannelImages = new Dictionary<int, BitmapSource>();
     private double? _manualMaxDepthMeters;
+    private bool _isDepthAutoRange = true;
+    private double _autoMaxDepthMeters;
     private DateTimeOffset _lastTick = DateTimeOffset.Now;
     private bool _isUpdatingSeek;
     private DepthUnit _depthUnit = DepthUnit.Meters;
@@ -332,6 +334,8 @@ public partial class MainWindow : Window
     {
         _recording = ProcessedProjectLoader.Load(manifestPath);
         _manualMaxDepthMeters = null;
+        _isDepthAutoRange = true;
+        _autoMaxDepthMeters = GetAutoMaxRangeMeters();
         RenderRawChannelImages();
         _channels.Clear();
 
@@ -355,6 +359,7 @@ public partial class MainWindow : Window
         _playback.Seek(0, _recording.DurationSeconds);
         RenderChannels();
         UpdateReadouts();
+        UpdateDepthAutoButtonState();
     }
 
     private void Channel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -418,6 +423,14 @@ public partial class MainWindow : Window
         _speedUnit = SelectedSpeedUnit();
         _temperatureUnit = SelectedTemperatureUnit();
         _utcOffsetHours = SelectedUtcOffsetHours();
+
+        if (_recording is not null && _isDepthAutoRange)
+        {
+            _autoMaxDepthMeters = GetAutoMaxRangeMeters();
+            RebuildDepthScaledView();
+            return;
+        }
+
         RenderChannels();
         UpdateReadouts();
     }
@@ -437,6 +450,7 @@ public partial class MainWindow : Window
         }
 
         var current = GetDisplayMaxRangeMeters();
+        _isDepthAutoRange = false;
         _manualMaxDepthMeters = Math.Max(3.0, current * 0.8);
         RebuildDepthScaledView();
     }
@@ -450,7 +464,8 @@ public partial class MainWindow : Window
 
         var auto = GetAutoMaxRangeMeters();
         var current = GetDisplayMaxRangeMeters();
-        _manualMaxDepthMeters = Math.Min(auto, current * 1.25);
+        _isDepthAutoRange = false;
+        _manualMaxDepthMeters = Math.Min(GetFileMaxRangeMeters(), Math.Max(auto, current * 1.25));
         RebuildDepthScaledView();
     }
 
@@ -461,7 +476,9 @@ public partial class MainWindow : Window
             return;
         }
 
+        _isDepthAutoRange = true;
         _manualMaxDepthMeters = null;
+        _autoMaxDepthMeters = GetAutoMaxRangeMeters();
         RebuildDepthScaledView();
     }
 
@@ -500,6 +517,11 @@ public partial class MainWindow : Window
         if (ping is null)
         {
             return;
+        }
+
+        if (_isDepthAutoRange && UpdateAutoRangeFromDepth(ping.DepthMeters))
+        {
+            RebuildDepthScaledView();
         }
 
         DepthReadout.Text = $"Depth: {FormatDepth(ping.DepthMeters)}";
@@ -680,13 +702,15 @@ public partial class MainWindow : Window
 
         RenderChannels();
         UpdateReadouts();
+        UpdateDepthAutoButtonState();
     }
 
     private void RenderRawChannelImages()
     {
+        var displayMaxRange = GetDisplayMaxRangeMeters();
         _rawChannelImages = _recording is null
             ? new Dictionary<int, BitmapSource>()
-            : BinaryWaterfallRenderer.Render(_recording, _manualMaxDepthMeters);
+            : BinaryWaterfallRenderer.Render(_recording, displayMaxRange > 0 ? displayMaxRange : null);
     }
 
     private void RenderStacked(IReadOnlyList<ChannelViewModel> channels)
@@ -982,10 +1006,28 @@ public partial class MainWindow : Window
 
     private double GetDisplayMaxRangeMeters()
     {
-        return _manualMaxDepthMeters ?? GetAutoMaxRangeMeters();
+        return _isDepthAutoRange
+            ? _autoMaxDepthMeters
+            : _manualMaxDepthMeters ?? _autoMaxDepthMeters;
     }
 
     private double GetAutoMaxRangeMeters()
+    {
+        var ping = _recording?.FindNearestTelemetry(_playback.CurrentTimeSeconds);
+        return GetAutoMaxRangeMeters(ping?.DepthMeters);
+    }
+
+    private double GetAutoMaxRangeMeters(double? currentDepthMeters)
+    {
+        if (currentDepthMeters.HasValue && currentDepthMeters.Value > 0)
+        {
+            return CalculateAutoDepthRangeMeters(currentDepthMeters.Value);
+        }
+
+        return GetFileMaxRangeMeters();
+    }
+
+    private double GetFileMaxRangeMeters()
     {
         if (_recording is null)
         {
@@ -997,6 +1039,95 @@ public partial class MainWindow : Window
             .Select(channel => channel.MaximumRangeMeters ?? 0)
             .DefaultIfEmpty(0)
             .Max();
+    }
+
+    private bool UpdateAutoRangeFromDepth(double? currentDepthMeters)
+    {
+        if (!_isDepthAutoRange)
+        {
+            return false;
+        }
+
+        if (!currentDepthMeters.HasValue || currentDepthMeters.Value <= 0)
+        {
+            return false;
+        }
+
+        var target = GetAutoDepthTargetMeters(currentDepthMeters.Value);
+        var next = CalculateAutoDepthRangeMeters(currentDepthMeters.Value);
+        var gridLine = GetDepthGridIntervalMeters();
+
+        if (_autoMaxDepthMeters > 0 &&
+            target <= _autoMaxDepthMeters - gridLine &&
+            next >= _autoMaxDepthMeters - (2 * gridLine))
+        {
+            return false;
+        }
+
+        if (next <= 0 || Math.Abs(next - _autoMaxDepthMeters) < 0.001)
+        {
+            return false;
+        }
+
+        _autoMaxDepthMeters = next;
+        return true;
+    }
+
+    private double CalculateAutoDepthRangeMeters(double depthMeters)
+    {
+        var targetMeters = GetAutoDepthTargetMeters(depthMeters);
+        var quantumMeters = GetDepthGridIntervalMeters() * 2.0;
+        var minMeters = 10.0 / 3.280839895;
+
+        if (targetMeters <= minMeters)
+        {
+            return minMeters;
+        }
+
+        return Math.Ceiling(targetMeters / quantumMeters) * quantumMeters;
+    }
+
+    private double GetAutoDepthTargetMeters(double depthMeters)
+    {
+        var depthFeet = depthMeters * 3.280839895;
+        if (depthFeet < 10)
+        {
+            return 10.0 / 3.280839895;
+        }
+
+        var factor = depthFeet > 1000 ? 1.10 : 1.20;
+        return depthMeters * factor;
+    }
+
+    private double GetDepthGridIntervalMeters()
+    {
+        return _depthUnit switch
+        {
+            DepthUnit.Feet => 10.0 / 3.280839895,
+            DepthUnit.Fathoms => 1.8288,
+            _ => 3.0
+        };
+    }
+
+    private void UpdateDepthAutoButtonState()
+    {
+        if (DepthZoomAutoButton is null)
+        {
+            return;
+        }
+
+        if (_isDepthAutoRange)
+        {
+            DepthZoomAutoButton.Background = new SolidColorBrush(Color.FromRgb(46, 138, 87));
+            DepthZoomAutoButton.BorderBrush = new SolidColorBrush(Color.FromRgb(92, 220, 139));
+            DepthZoomAutoButton.Foreground = Brushes.White;
+        }
+        else
+        {
+            DepthZoomAutoButton.ClearValue(System.Windows.Controls.Control.BackgroundProperty);
+            DepthZoomAutoButton.ClearValue(System.Windows.Controls.Control.BorderBrushProperty);
+            DepthZoomAutoButton.ClearValue(System.Windows.Controls.Control.ForegroundProperty);
+        }
     }
 
     private void UpdateCursorPositions()
