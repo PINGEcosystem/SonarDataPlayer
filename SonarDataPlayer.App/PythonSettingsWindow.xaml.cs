@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using Forms = System.Windows.Forms;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 
 namespace SonarDataPlayer.App;
@@ -16,9 +17,30 @@ public partial class PythonSettingsWindow : Window
         Settings = settings;
         EnvPathText.Text = Environment.GetEnvironmentVariable(PythonEnvVar) ?? "";
         PythonPathText.Text = settings.PythonPath ?? "";
+        PingverterRootText.Text = settings.PingverterRoot ?? FindDefaultPingverterRoot() ?? "";
         UseEnvRadio.IsChecked = settings.UseEnvironmentPython;
         UsePathRadio.IsChecked = !settings.UseEnvironmentPython;
         TestOutputText.Text = "Click Test to run the selected Python interpreter.";
+    }
+
+    private void BrowsePingverter_Click(object sender, RoutedEventArgs e)
+    {
+        using var dialog = new Forms.FolderBrowserDialog
+        {
+            Description = "Select the local PINGverter repository root",
+            ShowNewFolderButton = false,
+            UseDescriptionForTitle = true
+        };
+
+        if (!string.IsNullOrWhiteSpace(PingverterRootText.Text) && Directory.Exists(PingverterRootText.Text))
+        {
+            dialog.SelectedPath = PingverterRootText.Text;
+        }
+
+        if (dialog.ShowDialog() == Forms.DialogResult.OK)
+        {
+            PingverterRootText.Text = dialog.SelectedPath;
+        }
     }
 
     public AppSettings Settings { get; private set; }
@@ -63,7 +85,8 @@ public partial class PythonSettingsWindow : Window
     {
         Settings = new AppSettings(
             PythonPath: string.IsNullOrWhiteSpace(PythonPathText.Text) ? null : PythonPathText.Text.Trim(),
-            UseEnvironmentPython: UseEnvRadio.IsChecked == true);
+            UseEnvironmentPython: UseEnvRadio.IsChecked == true,
+            PingverterRoot: string.IsNullOrWhiteSpace(PingverterRootText.Text) ? null : PingverterRootText.Text.Trim());
         Settings.Save();
         DialogResult = true;
     }
@@ -105,9 +128,10 @@ public partial class PythonSettingsWindow : Window
         process.StartInfo.ArgumentList.Add(
             "import sys; print(sys.version.replace('\\n', ' '));\n" +
             "try:\n" +
-            " import numpy, pandas\n" +
+            " import numpy, pandas, PIL\n" +
             " print('numpy:', numpy.__version__)\n" +
             " print('pandas:', pandas.__version__)\n" +
+            " print('pillow:', PIL.__version__)\n" +
             "except Exception as exc:\n" +
             " print('dependency_error:', exc)\n");
 
@@ -135,5 +159,16 @@ public partial class PythonSettingsWindow : Window
         {
             return $"Failed to run Python:\n{ex.Message}";
         }
+    }
+
+    private static string? FindDefaultPingverterRoot()
+    {
+        var candidates = new[]
+        {
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "PINGverter")),
+            Path.Combine(Environment.CurrentDirectory, "..", "PINGverter")
+        };
+
+        return candidates.FirstOrDefault(path => Directory.Exists(Path.Combine(path, "pingverter")));
     }
 }

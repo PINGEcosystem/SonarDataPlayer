@@ -14,10 +14,8 @@ using SonarDataPlayer.Core;
 using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
 using FontFamily = System.Windows.Media.FontFamily;
-using Forms = System.Windows.Forms;
 using HorizontalAlignment = System.Windows.HorizontalAlignment;
 using Line = System.Windows.Shapes.Line;
-using MessageBox = System.Windows.MessageBox;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 using Panel = System.Windows.Controls.Panel;
 using Point = System.Windows.Point;
@@ -82,38 +80,17 @@ public partial class MainWindow : Window
         LoadRecording(dialog.FileName);
     }
 
-    private async void NewProject_Click(object sender, RoutedEventArgs e)
+    private void NewProject_Click(object sender, RoutedEventArgs e)
     {
-        var rsdDialog = new OpenFileDialog
+        var dialog = new NewProjectWindow(_settings)
         {
-            Title = "Select Garmin RSD file",
-            Filter = "Garmin RSD files (*.rsd;*.RSD)|*.rsd;*.RSD|All files (*.*)|*.*"
+            Owner = this
         };
 
-        if (rsdDialog.ShowDialog(this) != true)
+        if (dialog.ShowDialog() == true && dialog.OpenProjectAfterProcessing && File.Exists(dialog.ManifestPath))
         {
-            return;
+            LoadRecording(dialog.ManifestPath);
         }
-
-        using var folderDialog = new Forms.FolderBrowserDialog
-        {
-            Description = "Choose or create the SonarDataPlayer project folder",
-            ShowNewFolderButton = true,
-            UseDescriptionForTitle = true
-        };
-
-        var defaultRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "ProcessedRecordings"));
-        if (Directory.Exists(defaultRoot))
-        {
-            folderDialog.SelectedPath = defaultRoot;
-        }
-
-        if (folderDialog.ShowDialog() != Forms.DialogResult.OK || string.IsNullOrWhiteSpace(folderDialog.SelectedPath))
-        {
-            return;
-        }
-
-        await ExportRsdProjectAsync(rsdDialog.FileName, folderDialog.SelectedPath);
     }
 
     private void PythonSettings_Click(object sender, RoutedEventArgs e)
@@ -131,114 +108,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task ExportRsdProjectAsync(string rsdPath, string outputPath)
-    {
-        var scriptPath = FindExportScript();
-        if (scriptPath is null)
-        {
-            MessageBox.Show(
-                this,
-                "Could not find tools\\export_rsd_project.py. Run from a source checkout or package the exporter with the app.",
-                "Exporter not found",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            return;
-        }
-
-        Directory.CreateDirectory(outputPath);
-        ProjectStatusText.Text = "Exporting project...";
-        ProjectStatusText.Foreground = new SolidColorBrush(Color.FromRgb(255, 239, 132));
-
-        var pythonPath = FindPythonExecutable(_settings);
-        if (pythonPath is null)
-        {
-            ProjectStatusText.Text = "Python dependencies missing";
-            ProjectStatusText.Foreground = new SolidColorBrush(Color.FromRgb(255, 116, 116));
-            MessageBox.Show(
-                this,
-                "Could not find a Python environment with the modules needed by the Garmin parser.\n\n" +
-                "Install the parser dependencies with:\n" +
-                "python -m pip install numpy pandas\n\n" +
-                "You can also set SONAR_DATA_PLAYER_PYTHON to a specific python.exe.",
-                "Python dependencies missing",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            return;
-        }
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = pythonPath,
-            WorkingDirectory = Path.GetDirectoryName(scriptPath) ?? AppContext.BaseDirectory,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        startInfo.ArgumentList.Add(scriptPath);
-        startInfo.ArgumentList.Add(rsdPath);
-        startInfo.ArgumentList.Add(outputPath);
-
-        var process = new Process
-        {
-            StartInfo = startInfo
-        };
-
-        try
-        {
-            process.Start();
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-
-            if (process.ExitCode != 0)
-            {
-                ProjectStatusText.Text = "Export failed";
-                ProjectStatusText.Foreground = new SolidColorBrush(Color.FromRgb(255, 116, 116));
-                MessageBox.Show(
-                    this,
-                    string.IsNullOrWhiteSpace(stderr) ? stdout : stderr,
-                    "RSD export failed",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-                return;
-            }
-
-            var manifestPath = Path.Combine(outputPath, "manifest.json");
-            if (!File.Exists(manifestPath))
-            {
-                ProjectStatusText.Text = "Export finished, manifest missing";
-                ProjectStatusText.Foreground = new SolidColorBrush(Color.FromRgb(255, 116, 116));
-                return;
-            }
-
-            ProjectStatusText.Text = "Export complete";
-            ProjectStatusText.Foreground = new SolidColorBrush(Color.FromRgb(88, 214, 141));
-            LoadRecording(manifestPath);
-        }
-        catch (Exception ex)
-        {
-            ProjectStatusText.Text = "Export failed";
-            ProjectStatusText.Foreground = new SolidColorBrush(Color.FromRgb(255, 116, 116));
-            MessageBox.Show(this, ex.Message, "RSD export failed", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private static string? FindExportScript()
-    {
-        var candidates = new[]
-        {
-            Path.Combine(AppContext.BaseDirectory, "tools", "export_rsd_project.py"),
-            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "tools", "export_rsd_project.py")),
-            Path.Combine(Environment.CurrentDirectory, "tools", "export_rsd_project.py")
-        };
-
-        return candidates.FirstOrDefault(File.Exists);
-    }
-
-    private static string? FindPythonExecutable(AppSettings settings)
+    internal static string? FindPythonExecutable(AppSettings settings)
     {
         var configured = Environment.GetEnvironmentVariable("SONAR_DATA_PLAYER_PYTHON");
         var candidates = new List<string>();
@@ -291,7 +161,7 @@ public partial class MainWindow : Window
             .FirstOrDefault(PythonHasParserDependencies);
     }
 
-    private static bool PythonHasParserDependencies(string pythonPath)
+    internal static bool PythonHasParserDependencies(string pythonPath)
     {
         if (Path.IsPathFullyQualified(pythonPath) && !File.Exists(pythonPath))
         {
@@ -310,7 +180,7 @@ public partial class MainWindow : Window
             }
         };
         process.StartInfo.ArgumentList.Add("-c");
-        process.StartInfo.ArgumentList.Add("import numpy, pandas");
+        process.StartInfo.ArgumentList.Add("import numpy, pandas, PIL");
 
         try
         {
@@ -1316,7 +1186,7 @@ public enum TemperatureUnit
     Fahrenheit
 }
 
-public sealed record AppSettings(string? PythonPath, bool UseEnvironmentPython = true)
+public sealed record AppSettings(string? PythonPath = null, bool UseEnvironmentPython = true, string? PingverterRoot = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
