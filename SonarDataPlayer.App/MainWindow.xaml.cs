@@ -1057,11 +1057,13 @@ public partial class MainWindow : Window
         var next = CalculateAutoDepthRangeMeters(currentDepthMeters.Value);
         var gridLine = GetDepthGridIntervalMeters();
 
-        if (_autoMaxDepthMeters > 0 &&
-            target <= _autoMaxDepthMeters - gridLine &&
-            next >= _autoMaxDepthMeters - (2 * gridLine))
+        if (_autoMaxDepthMeters > 0 && next < _autoMaxDepthMeters)
         {
-            return false;
+            var shrinkThreshold = _autoMaxDepthMeters - (3 * gridLine);
+            if (target >= shrinkThreshold)
+            {
+                return false;
+            }
         }
 
         if (next <= 0 || Math.Abs(next - _autoMaxDepthMeters) < 0.001)
