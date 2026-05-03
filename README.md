@@ -1,6 +1,6 @@
 # SonarDataPlayer
 
-SonarDataPlayer is a lightweight Windows desktop application for playing back processed sonar recordings. The first targets are Garmin RSD and Lowrance SL2/SL3 data exported into synchronized channel waterfall views and ping telemetry.
+SonarDataPlayer is a lightweight Windows desktop application for creating and playing back processed sonar projects. The current targets are Garmin RSD and Lowrance SL2/SL3 recordings exported into synchronized channel waterfall views and ping telemetry.
 
 The app is intentionally a single-process .NET desktop program: no web server, Node.js, or browser frontend is required for playback. A local PINGverter checkout is currently used only when creating a new processed project from raw sonar recordings.
 
@@ -12,7 +12,8 @@ The app is intentionally a single-process .NET desktop program: no web server, N
 - In-app Garmin RSD and Lowrance SL2/SL3 project creation through PINGverter.
 - Raw sample playback using `frames.jsonl` and `samples.u16le`, with PNG preview/fallback assets.
 - Play, pause, seek, speed selection, channel visibility, opacity controls, and telemetry readouts.
-- Depth, speed, temperature unit controls, time/depth zoom, and stacked/overlay channel views.
+- Depth, speed, temperature unit controls, time/depth zoom, auto depth range, and stacked/overlay channel views.
+- Python/PINGverter settings dialog with interpreter testing and saved project root selection.
 
 Raw recording parsing is currently delegated to a configured local PINGverter checkout. Porting direct parsers into the application remains a future cleanup step.
 
@@ -30,6 +31,11 @@ docs/                     Project format and development notes
 - .NET 8 SDK or newer.
 - Python 3 with `numpy`, `pandas`, and `pillow` if you want to create projects from `.RSD`, `.SL2`, or `.SL3` files inside the app.
 - A local PINGverter checkout with `write_sonar_data_player_project(...)` support for the formats you want to process.
+
+For the current development workflow, use the companion PINGverter branches that add SonarDataPlayer project export support:
+
+- Garmin RSD: `garmin-rsd-waterfall-validation`
+- Lowrance SL2/SL3: `lowrance-sonar-data-player-export`
 
 Check your SDK:
 
@@ -56,6 +62,22 @@ Use **Open Project** and select a processed `manifest.json`.
 
 See [docs/processed-project-format.md](docs/processed-project-format.md) for the expected folder layout.
 
+## Settings
+
+Use **Python...** to configure project creation:
+
+- View the `SONAR_DATA_PLAYER_PYTHON` environment variable.
+- Set and save a Python executable path.
+- Choose whether Python resolution prefers the environment variable or saved path.
+- Test the selected Python interpreter and dependency imports.
+- Set the local PINGverter repository root.
+
+Settings are saved under:
+
+```text
+%AppData%\SonarDataPlayer\settings.json
+```
+
 ## Create A Project From A Recording
 
 In the app:
@@ -64,8 +86,14 @@ In the app:
 2. Set the local PINGverter repository root in **Python...**.
 3. Use **New Project**.
 4. Select a Garmin `.RSD` or Lowrance `.SL2` / `.SL3` file.
-5. Choose or create the output project folder.
+5. Choose the **Projects root** folder where generated projects should be stored.
 6. Click **Process Recording**.
+
+The dialog generates the actual project folder from the recording file name, for example:
+
+```text
+<Projects root>\8A cobia
+```
 
 If **Open project when complete** is checked, the app loads the generated `manifest.json` automatically.
 
@@ -81,6 +109,8 @@ Install the parser dependencies into your chosen Python environment:
 ```powershell
 python -m pip install numpy pandas pillow
 ```
+
+The processing dialog streams PINGverter output so parse/export errors are visible without leaving the app.
 
 ## Package A Portable Windows Build
 
@@ -98,7 +128,7 @@ The portable executable will be written to `publish\win-x64`.
 
 ## Processed Recording Workflow
 
-PINGverter writes:
+For each generated project, PINGverter writes:
 
 - `manifest.json`
 - `pings.csv`
@@ -106,7 +136,7 @@ PINGverter writes:
 - `samples.u16le`
 - `channels\*_channel_*.png`
 
-The project workflow is:
+The project creation workflow is:
 
 1. Parse the raw sonar file.
 2. Export ping metadata to CSV.
@@ -118,7 +148,7 @@ The project workflow is:
 8. Write a `manifest.json` that points to the CSV, frame index, sample blob, and PNGs.
 9. Open the manifest in SonarDataPlayer.
 
-This workflow keeps playback deployment simple while we finish porting the parser into C#.
+This workflow keeps playback deployment simple while raw format parsing remains in PINGverter.
 
 When `frames.jsonl` and `samples.u16le` are present, the app renders from raw samples with one shared intensity scale. PNGs are kept as preview/fallback assets.
 
