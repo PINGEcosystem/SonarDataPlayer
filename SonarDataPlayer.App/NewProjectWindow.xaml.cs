@@ -10,7 +10,7 @@ namespace SonarDataPlayer.App;
 
 public partial class NewProjectWindow : Window
 {
-    private readonly AppSettings _settings;
+    private AppSettings _settings;
     private bool _processed;
 
     public NewProjectWindow(AppSettings settings)
@@ -20,8 +20,10 @@ public partial class NewProjectWindow : Window
 
         var pingverterRoot = ResolvePingverterRoot(settings);
         PingverterRootText.Text = pingverterRoot ?? "Not configured. Set this in Python settings.";
-        OutputFolderText.Text = DefaultProjectFolder();
-        AppendOutput("Select a recording and output folder, then click Process Recording.");
+        ProjectsRootText.Text = settings.ProjectsRoot ?? DefaultProjectFolder();
+        ProjectsRootText.TextChanged += (_, _) => UpdateGeneratedFolder();
+        UpdateGeneratedFolder();
+        AppendOutput("Select a recording and projects root, then click Process Recording.");
     }
 
     public string ManifestPath { get; private set; } = "";
@@ -39,7 +41,7 @@ public partial class NewProjectWindow : Window
         if (dialog.ShowDialog(this) == true)
         {
             InputFileText.Text = dialog.FileName;
-            OutputFolderText.Text = Path.Combine(DefaultProjectFolder(), Path.GetFileNameWithoutExtension(dialog.FileName));
+            UpdateGeneratedFolder();
         }
     }
 
@@ -52,14 +54,16 @@ public partial class NewProjectWindow : Window
             UseDescriptionForTitle = true
         };
 
-        if (!string.IsNullOrWhiteSpace(OutputFolderText.Text))
+        if (!string.IsNullOrWhiteSpace(ProjectsRootText.Text))
         {
-            dialog.SelectedPath = OutputFolderText.Text;
+            dialog.SelectedPath = ProjectsRootText.Text;
         }
 
         if (dialog.ShowDialog() == Forms.DialogResult.OK)
         {
-            OutputFolderText.Text = dialog.SelectedPath;
+            ProjectsRootText.Text = dialog.SelectedPath;
+            SaveProjectsRoot();
+            UpdateGeneratedFolder();
         }
     }
 
@@ -117,7 +121,7 @@ public partial class NewProjectWindow : Window
         pythonPath = MainWindow.FindPythonExecutable(_settings) ?? "";
         pingverterRoot = ResolvePingverterRoot(_settings) ?? "";
         inputFile = InputFileText.Text.Trim();
-        outputFolder = OutputFolderText.Text.Trim();
+        outputFolder = GeneratedProjectFolder(inputFile);
 
         if (string.IsNullOrWhiteSpace(pythonPath))
         {
@@ -146,10 +150,11 @@ public partial class NewProjectWindow : Window
 
         if (string.IsNullOrWhiteSpace(outputFolder))
         {
-            AppendOutput("Choose a project folder.");
+            AppendOutput("Choose a projects root folder.");
             return false;
         }
 
+        SaveProjectsRoot();
         return true;
     }
 
@@ -211,6 +216,47 @@ public partial class NewProjectWindow : Window
     {
         OutputText.AppendText(text + Environment.NewLine);
         OutputText.ScrollToEnd();
+    }
+
+    private void UpdateGeneratedFolder()
+    {
+        var input = InputFileText.Text.Trim();
+        GeneratedFolderText.Text = string.IsNullOrWhiteSpace(input)
+            ? Path.Combine(ProjectsRootText.Text.Trim(), "<recording name>")
+            : GeneratedProjectFolder(input);
+    }
+
+    private string GeneratedProjectFolder(string inputFile)
+    {
+        var root = ProjectsRootText.Text.Trim();
+        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(inputFile))
+        {
+            return "";
+        }
+
+        return Path.Combine(root, SafeProjectFolderName(Path.GetFileNameWithoutExtension(inputFile)));
+    }
+
+    private void SaveProjectsRoot()
+    {
+        var root = ProjectsRootText.Text.Trim();
+        if (string.IsNullOrWhiteSpace(root) || string.Equals(root, _settings.ProjectsRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _settings = _settings with { ProjectsRoot = root };
+        _settings.Save();
+    }
+
+    private static string SafeProjectFolderName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var chars = value
+            .Select(ch => invalid.Contains(ch) ? '_' : ch)
+            .ToArray();
+        var safe = new string(chars).Trim();
+        return string.IsNullOrWhiteSpace(safe) ? "SonarProject" : safe;
     }
 
     private static string DefaultProjectFolder()

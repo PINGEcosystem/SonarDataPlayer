@@ -1186,7 +1186,11 @@ public enum TemperatureUnit
     Fahrenheit
 }
 
-public sealed record AppSettings(string? PythonPath = null, bool UseEnvironmentPython = true, string? PingverterRoot = null)
+public sealed record AppSettings(
+    string? PythonPath = null,
+    bool UseEnvironmentPython = true,
+    string? PingverterRoot = null,
+    string? ProjectsRoot = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
