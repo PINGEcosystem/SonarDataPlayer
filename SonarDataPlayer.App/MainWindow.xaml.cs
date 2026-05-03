@@ -118,40 +118,17 @@ public partial class MainWindow : Window
 
     private void PythonSettings_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog
+        var dialog = new PythonSettingsWindow(_settings)
         {
-            Title = "Select Python executable",
-            Filter = "Python executable (python.exe)|python.exe|Executables (*.exe)|*.exe|All files (*.*)|*.*"
+            Owner = this
         };
 
-        var initialPath = _settings.PythonPath;
-        if (!string.IsNullOrWhiteSpace(initialPath) && File.Exists(initialPath))
+        if (dialog.ShowDialog() == true)
         {
-            dialog.InitialDirectory = Path.GetDirectoryName(initialPath);
-            dialog.FileName = Path.GetFileName(initialPath);
+            _settings = dialog.Settings;
+            ProjectStatusText.Text = "Python settings saved";
+            ProjectStatusText.Foreground = new SolidColorBrush(Color.FromRgb(88, 214, 141));
         }
-
-        if (dialog.ShowDialog(this) != true)
-        {
-            return;
-        }
-
-        if (!PythonHasParserDependencies(dialog.FileName))
-        {
-            MessageBox.Show(
-                this,
-                "That Python executable is missing modules needed by the Garmin parser.\n\n" +
-                $"Run:\n{dialog.FileName} -m pip install numpy pandas",
-                "Python dependencies missing",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            return;
-        }
-
-        _settings = _settings with { PythonPath = dialog.FileName };
-        _settings.Save();
-        ProjectStatusText.Text = "Python configured";
-        ProjectStatusText.Foreground = new SolidColorBrush(Color.FromRgb(88, 214, 141));
     }
 
     private async Task ExportRsdProjectAsync(string rsdPath, string outputPath)
@@ -265,14 +242,30 @@ public partial class MainWindow : Window
     {
         var configured = Environment.GetEnvironmentVariable("SONAR_DATA_PLAYER_PYTHON");
         var candidates = new List<string>();
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            candidates.Add(configured);
-        }
 
-        if (!string.IsNullOrWhiteSpace(settings.PythonPath))
+        if (settings.UseEnvironmentPython)
         {
-            candidates.Add(settings.PythonPath);
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                candidates.Add(configured);
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings.PythonPath))
+            {
+                candidates.Add(settings.PythonPath);
+            }
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(settings.PythonPath))
+            {
+                candidates.Add(settings.PythonPath);
+            }
+
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                candidates.Add(configured);
+            }
         }
 
         candidates.AddRange(new[]
@@ -1323,7 +1316,7 @@ public enum TemperatureUnit
     Fahrenheit
 }
 
-public sealed record AppSettings(string? PythonPath)
+public sealed record AppSettings(string? PythonPath, bool UseEnvironmentPython = true)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
