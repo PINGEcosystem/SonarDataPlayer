@@ -317,17 +317,17 @@
                                FontWeight="SemiBold"
                                Margin="0,0,0,10" />
 
-                        <TextBlock Text="Horizontal Stretch"
+                        <TextBlock Text="Along-Track Stretch"
                                Foreground="#8E9AAD"
                                Margin="0,0,0,4" />
-                        <Slider x:Name="HorizontalStretchSlider"
+                        <Slider x:Name="AlongTrackStretchSlider"
                             Height="28"
                             Minimum="1.0"
                             Maximum="4.0"
                             Value="1.0"
                             TickFrequency="0.1"
-                            ValueChanged="HorizontalStretchSlider_ValueChanged" />
-                        <TextBlock x:Name="HorizontalStretchValueText"
+                            ValueChanged="AlongTrackStretchSlider_ValueChanged" />
+                        <TextBlock x:Name="AlongTrackStretchValueText"
                                Foreground="#D7DEE8"
                                Margin="0,2,0,10"
                                Text="1.00x" />

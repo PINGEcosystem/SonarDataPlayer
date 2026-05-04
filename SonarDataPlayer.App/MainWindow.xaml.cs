@@ -56,7 +56,7 @@ public partial class MainWindow : Window
     private int _utcOffsetHours = -4;
     private AppSettings _settings = AppSettings.Load();
     private bool _isRefreshingPaletteSelector;
-    private double _horizontalStretch = 1.0;
+    private double _alongTrackStretch = 1.0;
     private BitmapSource? _sideScanImage;
     private double _sideScanMaxRangeMeters;
     private double[]? _frameRawTimes;
@@ -75,7 +75,7 @@ public partial class MainWindow : Window
         ContrastLockCheckBox.IsChecked = _settings.ContrastLockAcrossChannels;
         RefreshSideScanBoostControl();
         _isRefreshingPaletteSelector = false;
-        UpdateHorizontalStretchReadout();
+        UpdateAlongTrackStretchReadout();
 
         ChannelControls.ItemsSource = _channels;
 
@@ -250,8 +250,9 @@ public partial class MainWindow : Window
             ? $"{title}  | raw samples"
             : $"{title}  | preview PNGs";
         EmptyViewerText.Visibility = _channels.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        SeekSlider.Maximum = Math.Max(0, _recording.DurationSeconds);
-        _playback.Seek(0, _recording.DurationSeconds);
+        var playbackDuration = GetPlaybackDurationSeconds();
+        SeekSlider.Maximum = playbackDuration;
+        _playback.Seek(0, playbackDuration);
         RenderChannels();
         UpdateReadouts();
         UpdateDepthAutoButtonState();
@@ -302,7 +303,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _playback.Seek(e.NewValue, _recording.DurationSeconds);
+        _playback.Seek(e.NewValue, GetPlaybackDurationSeconds());
         UpdateReadouts();
     }
 
@@ -318,10 +319,10 @@ public partial class MainWindow : Window
         UpdateReadouts();
     }
 
-    private void HorizontalStretchSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    private void AlongTrackStretchSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        _horizontalStretch = Math.Clamp(e.NewValue, 1.0, 4.0);
-        UpdateHorizontalStretchReadout();
+        _alongTrackStretch = Math.Clamp(e.NewValue, 1.0, 4.0);
+        UpdateAlongTrackStretchReadout();
 
         if (_recording is null)
         {
@@ -741,7 +742,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _playback.Advance(elapsed, _recording.DurationSeconds);
+        _playback.Advance(elapsed, GetPlaybackDurationSeconds());
         PlayPauseButton.Content = _playback.IsPlaying ? "Pause" : "Play";
         UpdateReadouts();
     }
@@ -757,7 +758,8 @@ public partial class MainWindow : Window
         SeekSlider.Value = _playback.CurrentTimeSeconds;
         _isUpdatingSeek = false;
 
-        TimeReadout.Text = $"{_playback.CurrentTimeSeconds:0.0} / {_recording.DurationSeconds:0.0} s";
+        var playbackDuration = GetPlaybackDurationSeconds();
+        TimeReadout.Text = $"{_playback.CurrentTimeSeconds:0.0} / {playbackDuration:0.0} s";
         UpdateImageViewports();
         UpdateCursorPositions();
 
@@ -787,11 +789,11 @@ public partial class MainWindow : Window
         return value.HasValue ? value.Value.ToString(format) : "-";
     }
 
-    private void UpdateHorizontalStretchReadout()
+    private void UpdateAlongTrackStretchReadout()
     {
-        if (HorizontalStretchValueText is not null)
+        if (AlongTrackStretchValueText is not null)
         {
-            HorizontalStretchValueText.Text = $"{_horizontalStretch:0.00}x";
+            AlongTrackStretchValueText.Text = $"{_alongTrackStretch:0.00}x";
         }
     }
 
@@ -1783,13 +1785,13 @@ public partial class MainWindow : Window
 
     private void UpdateCursorPositions()
     {
-        if (_recording is null || _recording.DurationSeconds <= 0)
+        if (_recording is null || GetPlaybackDurationSeconds() <= 0)
         {
             return;
         }
 
         var (visibleStart, visibleDuration) = GetVisibleTimeWindow();
-        var (startFraction, _, windowFraction) = GetVisibleRenderFractionWindow(visibleStart, visibleDuration);
+        var (startFraction, endFraction, windowFraction) = GetVisibleRenderFractionWindow(visibleStart, visibleDuration);
         var currentFraction = GetPlaybackRenderFraction();
         var t = windowFraction <= 0
             ? 0
@@ -1797,7 +1799,9 @@ public partial class MainWindow : Window
 
         if (IsSideScanMode())
         {
-            // Horizontal cursor: moves up and down with time.
+            // In side-scan mode the current ping is always at panel y=0 (top of
+            // the flipped image).  Pin both the cursor bar and the time label to
+            // the top of the panel so they are always co-located with the newest ping.
             foreach (var cursor in _timeCursors)
             {
                 if (cursor.Parent is not FrameworkElement parent || parent.ActualHeight <= 0)
@@ -1805,7 +1809,7 @@ public partial class MainWindow : Window
                     continue;
                 }
 
-                cursor.Margin = new Thickness(0, (parent.ActualHeight - cursor.Height) * t, 0, 0);
+                cursor.Margin = new Thickness(0, 0, 0, 0);
             }
 
             var labelText = FormatCursorLocalTime();
@@ -1817,13 +1821,7 @@ public partial class MainWindow : Window
                 }
 
                 label.Text = labelText;
-                label.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-                // Pin label to the right edge so it doesn't obscure the sonar.
-                var top = Math.Clamp(
-                    (parent.ActualHeight - label.DesiredSize.Height) * t,
-                    0,
-                    Math.Max(0, parent.ActualHeight - label.DesiredSize.Height));
-                label.Margin = new Thickness(0, top, 8, 0);
+                label.Margin = new Thickness(0, 2, 8, 0);
                 label.HorizontalAlignment = HorizontalAlignment.Right;
                 label.VerticalAlignment = VerticalAlignment.Top;
             }
@@ -1865,7 +1863,7 @@ public partial class MainWindow : Window
         }
 
         var (visibleStart, visibleDuration) = GetVisibleTimeWindow();
-        var (startFraction, _, windowFraction) = GetVisibleRenderFractionWindow(visibleStart, visibleDuration);
+        var (startFraction, endFraction, windowFraction) = GetVisibleRenderFractionWindow(visibleStart, visibleDuration);
 
         if (IsSideScanMode())
         {
@@ -1879,8 +1877,12 @@ public partial class MainWindow : Window
                 }
 
                 var imageHeight = parent.ActualHeight / windowFraction;
-                var top = -(startFraction * imageHeight);
+                var unclampedTop = -(imageHeight * (1.0 - endFraction));
+                var minTop = parent.ActualHeight - imageHeight;
+                var top = Math.Clamp(unclampedTop, minTop, 0);
                 image.Height = imageHeight;
+                // ScaleTransform(1,-1) is applied once at image creation; do not
+                // recreate it here to avoid triggering layout on every frame.
                 image.Margin = new Thickness(0, top, 0, 0);
 
                 // Cross-track crop: show [displayMin .. displayMax] metres centred on nadir.
@@ -1908,7 +1910,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            // Stacked / overlay: time axis is horizontal.
+            // Stacked / overlay: time axis is horizontal; clear any SS flip transform.
             foreach (var image in _sonarImages)
             {
                 if (image.Parent is not FrameworkElement parent || parent.ActualWidth <= 0)
@@ -1940,18 +1942,16 @@ public partial class MainWindow : Window
         var baseDuration = _zoomWindowSeconds <= 0
             ? axisDuration
             : Math.Min(_zoomWindowSeconds, axisDuration);
-        var duration = Math.Clamp(baseDuration / _horizontalStretch, 0.1, axisDuration);
+        var duration = Math.Clamp(baseDuration / _alongTrackStretch, 0.1, axisDuration);
         var axisCurrent = _playback.CurrentTimeSeconds;
 
-        // In side-scan mode, keep the current ping (boat position) at the top of the window
-        // so data scrolls downward as time advances.
+        // In side-scan mode the window covers [axisCurrent-duration, axisCurrent].
+        // The image is rendered flipped so the newest ping stays at the top of the
+        // panel and history trails downward.
         if (IsSideScanMode())
         {
-            var topAnchoredStart = Math.Clamp(
-                axisCurrent,
-                0,
-                Math.Max(0, axisDuration - duration));
-            return (topAnchoredStart, duration);
+            var ssStart = Math.Max(0, axisCurrent - duration);
+            return (ssStart, duration);
         }
 
         var start = Math.Clamp(
@@ -1971,6 +1971,11 @@ public partial class MainWindow : Window
         return _recording?.DurationSeconds ?? 0;
     }
 
+    private double GetPlaybackDurationSeconds()
+    {
+        return Math.Max(0, GetDisplayAxisDurationSeconds());
+    }
+
     private void BuildFrameTimelineModel()
     {
         _frameRawTimes = null;
@@ -1988,6 +1993,10 @@ public partial class MainWindow : Window
         for (var i = 0; i < rawTimes.Length; i++)
         {
             rawTimes[i] = Math.Max(0, rawTimes[i] - firstRaw);
+            if (i > 0 && rawTimes[i] < rawTimes[i - 1])
+            {
+                rawTimes[i] = rawTimes[i - 1];
+            }
         }
 
         _frameRawTimes = rawTimes;
@@ -2017,6 +2026,8 @@ public partial class MainWindow : Window
             return 0;
         }
 
+        // Bitmap columns are laid out by frame index, so overlays in stacked/overlay
+        // mode must use the same index-based fraction to stay aligned.
         return Math.Clamp(frameIndex / (double)(_frameCount - 1), 0, 1);
     }
 

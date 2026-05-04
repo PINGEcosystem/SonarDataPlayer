@@ -14,6 +14,7 @@ public static class BinaryWaterfallRenderer
 
     private static readonly Dictionary<string, RenderMetadata> MetadataCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, IReadOnlyDictionary<int, ContrastRange>> ContrastRangeCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, IReadOnlyDictionary<int, bool>> SideScanSampleOrderCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object CacheLock = new();
 
     public static IReadOnlyDictionary<int, BitmapSource> Render(
@@ -46,6 +47,7 @@ public static class BinaryWaterfallRenderer
             highPercentile,
             lockAcrossChannels);
         var sideScanGamma = 1.0 + Math.Clamp(sideScanContrastBoost, 0, 2.0);
+        var reversedSampleByChannel = GetCachedSideScanSampleOrder(recordingKey, recording);
         var boostedChannelIds = new HashSet<int>(
             recording.Channels
                 .Where(c =>
@@ -65,6 +67,7 @@ public static class BinaryWaterfallRenderer
                 ? configuredRange
                 : new ContrastRange(0, 1);
             var channelGamma = boostedChannelIds.Contains(channelId) ? sideScanGamma : 1.0;
+            var reverseSampleOrder = reversedSampleByChannel.TryGetValue(channelId, out var reverse) && reverse;
             var pixels = new byte[width * height * 4];
 
             using var stream = File.OpenRead(recording.SamplesPath);
@@ -85,6 +88,7 @@ public static class BinaryWaterfallRenderer
                         renderMaxRangeMeters,
                         contrastRange,
                         channelGamma,
+                        reverseSampleOrder,
                         palette);
                 }
 
@@ -314,6 +318,115 @@ public static class BinaryWaterfallRenderer
         return contrastByChannel;
     }
 
+    private static IReadOnlyDictionary<int, bool> GetCachedSideScanSampleOrder(string recordingKey, SonarRecording recording)
+    {
+        if (!string.IsNullOrWhiteSpace(recordingKey))
+        {
+            lock (CacheLock)
+            {
+                if (SideScanSampleOrderCache.TryGetValue(recordingKey, out var cached))
+                {
+                    return cached;
+                }
+            }
+        }
+
+        var computed = ComputeSideScanSampleOrder(recording);
+        if (!string.IsNullOrWhiteSpace(recordingKey))
+        {
+            lock (CacheLock)
+            {
+                SideScanSampleOrderCache[recordingKey] = computed;
+            }
+        }
+
+        return computed;
+    }
+
+    private static IReadOnlyDictionary<int, bool> ComputeSideScanSampleOrder(SonarRecording recording)
+    {
+        if (recording.SamplesPath is null)
+        {
+            return new Dictionary<int, bool>();
+        }
+
+        var sideScanIds = new HashSet<int>(
+            recording.Channels
+                .Where(c => c.Label.Contains("SideScan", StringComparison.OrdinalIgnoreCase))
+                .Select(c => c.ChannelId));
+        if (sideScanIds.Count == 0)
+        {
+            return new Dictionary<int, bool>();
+        }
+
+        var firstSum = new Dictionary<int, double>();
+        var lastSum = new Dictionary<int, double>();
+        var sampleWindows = new Dictionary<int, int>();
+        var maxFramesToScan = Math.Min(recording.Frames.Count, 180);
+
+        using var stream = File.OpenRead(recording.SamplesPath);
+        foreach (var frame in recording.Frames.Take(maxFramesToScan))
+        {
+            foreach (var block in frame.Channels)
+            {
+                if (!sideScanIds.Contains(block.ChannelId) || block.SampleCount < 8)
+                {
+                    continue;
+                }
+
+                var bytesToRead = block.SampleCount * 2;
+                var raw = ArrayPool<byte>.Shared.Rent(bytesToRead);
+                try
+                {
+                    stream.Seek(block.SampleOffset, SeekOrigin.Begin);
+                    if (!ReadExactly(stream, raw, bytesToRead))
+                    {
+                        continue;
+                    }
+
+                    var window = Math.Max(1, block.SampleCount / 8);
+                    double sumFirst = 0;
+                    double sumLast = 0;
+                    for (var i = 0; i < window; i++)
+                    {
+                        var firstRawIndex = i * 2;
+                        var firstValue = (ushort)(raw[firstRawIndex] | (raw[firstRawIndex + 1] << 8));
+                        sumFirst += firstValue;
+
+                        var lastSample = block.SampleCount - window + i;
+                        var lastRawIndex = lastSample * 2;
+                        var lastValue = (ushort)(raw[lastRawIndex] | (raw[lastRawIndex + 1] << 8));
+                        sumLast += lastValue;
+                    }
+
+                    firstSum[block.ChannelId] = firstSum.GetValueOrDefault(block.ChannelId, 0) + sumFirst;
+                    lastSum[block.ChannelId] = lastSum.GetValueOrDefault(block.ChannelId, 0) + sumLast;
+                    sampleWindows[block.ChannelId] = sampleWindows.GetValueOrDefault(block.ChannelId, 0) + window;
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(raw);
+                }
+            }
+        }
+
+        var output = new Dictionary<int, bool>();
+        foreach (var id in sideScanIds)
+        {
+            if (!sampleWindows.TryGetValue(id, out var windows) || windows <= 0)
+            {
+                continue;
+            }
+
+            var meanFirst = firstSum.GetValueOrDefault(id, 0) / windows;
+            var meanLast = lastSum.GetValueOrDefault(id, 0) / windows;
+            // If the first samples are much darker than the last samples, order is likely far->near.
+            output[id] = meanFirst < (meanLast * 0.85);
+        }
+
+        return output;
+    }
+
     private static ContrastRange ComputeRangeFromHistogram(
         long[] histogram,
         long sampleCount,
@@ -386,6 +499,7 @@ public static class BinaryWaterfallRenderer
         double displayMaxRangeMeters,
         ContrastRange contrastRange,
         double gamma,
+        bool reverseSampleOrder,
         IReadOnlyList<RgbColor> palette)
     {
         var raw = ArrayPool<byte>.Shared.Rent(block.ByteLength);
@@ -423,6 +537,10 @@ public static class BinaryWaterfallRenderer
 
                 var samplePosition = ((depthMeters - minRange) / (maxRange - minRange)) * (block.SampleCount - 1);
                 var sample = Math.Clamp((int)Math.Round(samplePosition), 0, block.SampleCount - 1);
+                if (reverseSampleOrder)
+                {
+                    sample = (block.SampleCount - 1) - sample;
+                }
                 var rawIndex = sample * 2;
                 var value = (ushort)(raw[rawIndex] | (raw[rawIndex + 1] << 8));
                 var normalizedLogValue = (Math.Log(1 + value) - contrastRange.LogMin) / logSpan;
@@ -513,6 +631,10 @@ public static class BinaryWaterfallRenderer
         }
 
         var recordingKey = BuildRecordingCacheKey(recording);
+        var reversedSampleByChannel = GetCachedSideScanSampleOrder(recordingKey, recording);
+        var reversePort = reversedSampleByChannel.TryGetValue(portChannel.ChannelId, out var reversePortFlag) && reversePortFlag;
+        var reverseStar = reversedSampleByChannel.TryGetValue(starChannel.ChannelId, out var reverseStarFlag) && reverseStarFlag;
+
         var metadata = GetRenderMetadata(recordingKey, recording);
         var portMaxSamples = metadata.MaxSamplesByChannel.GetValueOrDefault(portChannel.ChannelId, 0);
         var starMaxSamples = metadata.MaxSamplesByChannel.GetValueOrDefault(starChannel.ChannelId, 0);
@@ -529,8 +651,10 @@ public static class BinaryWaterfallRenderer
         var palette = SonarPaletteCatalog.Build(paletteName);
 
         // Image layout:
-        //   x in [0, portMaxSamples)        → port,       sample index = portMaxSamples-1-x (reversed)
-        //   x in [portMaxSamples, width)     → starboard,  sample index = x-portMaxSamples  (forward)
+        //   x in [0, portMaxSamples)        → port
+        //   x in [portMaxSamples, width)    → starboard
+        // Sample order can vary by channel and source. We normalize per-channel so the
+        // composed view is always nadir-centred with near->far outwards on both sides.
         var imgWidth = portMaxSamples + starMaxSamples;
         var imgHeight = recording.Frames.Count;
         var pixels = new byte[imgWidth * imgHeight * 4];
@@ -546,8 +670,9 @@ public static class BinaryWaterfallRenderer
             for (var y = 0; y < recording.Frames.Count; y++)
             {
                 var frame = recording.Frames[y];
+                var drawY = imgHeight - 1 - y;
 
-                // Port – reversed so nadir sits at the centre-left pixel.
+                // Port channel: map sample order to the left half.
                 var portBlock = frame.Channels.FirstOrDefault(c => c.ChannelId == portChannel.ChannelId);
                 if (portBlock is not null)
                 {
@@ -559,14 +684,16 @@ public static class BinaryWaterfallRenderer
                         {
                             var ri = s * 2;
                             var value = (ushort)(raw[ri] | (raw[ri + 1] << 8));
-                            // sample 0 = nadir → x = portMaxSamples-1; far port → x = 0
+                            var sourceSample = reversePort ? (count - 1 - s) : s;
+                            var sourceRawIndex = sourceSample * 2;
+                            var sourceValue = (ushort)(raw[sourceRawIndex] | (raw[sourceRawIndex + 1] << 8));
                             var x = portMaxSamples - 1 - s;
-                            PaintPixel(pixels, x, y, imgWidth, value, portContrast, gamma, palette);
+                            PaintPixel(pixels, x, drawY, imgWidth, sourceValue, portContrast, gamma, palette);
                         }
                     }
                 }
 
-                // Starboard – forward so nadir sits at the centre-right pixel.
+                // Starboard channel: map sample order to the right half.
                 var starBlock = frame.Channels.FirstOrDefault(c => c.ChannelId == starChannel.ChannelId);
                 if (starBlock is not null)
                 {
@@ -578,9 +705,11 @@ public static class BinaryWaterfallRenderer
                         {
                             var ri = s * 2;
                             var value = (ushort)(raw[ri] | (raw[ri + 1] << 8));
-                            // sample 0 = nadir → x = portMaxSamples; far starboard → x = imgWidth-1
+                            var sourceSample = reverseStar ? (count - 1 - s) : s;
+                            var sourceRawIndex = sourceSample * 2;
+                            var sourceValue = (ushort)(raw[sourceRawIndex] | (raw[sourceRawIndex + 1] << 8));
                             var x = portMaxSamples + s;
-                            PaintPixel(pixels, x, y, imgWidth, value, starContrast, gamma, palette);
+                            PaintPixel(pixels, x, drawY, imgWidth, sourceValue, starContrast, gamma, palette);
                         }
                     }
                 }
