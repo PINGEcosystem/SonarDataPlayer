@@ -155,6 +155,39 @@
 
                     <Separator Margin="0,12,0,14" Background="#2B3442" />
 
+                    <TextBlock Text="Display"
+                               Foreground="#EEF2F7"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,10" />
+
+                    <TextBlock Text="Color Scheme"
+                               Foreground="#8E9AAD"
+                               Margin="0,0,0,4" />
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <ComboBox x:Name="PaletteSelector"
+                                  Grid.Column="0"
+                                  Height="32"
+                                  SelectionChanged="PaletteSelector_SelectionChanged"
+                                  IsTextSearchEnabled="True" />
+
+                        <CheckBox x:Name="FullPaletteListCheckBox"
+                                  Grid.Column="1"
+                                  Margin="10,0,0,0"
+                                  VerticalAlignment="Center"
+                                  Foreground="#D7DEE8"
+                                  Content="Full list"
+                                  Checked="PaletteListVisibilityChanged"
+                                  Unchecked="PaletteListVisibilityChanged" />
+                    </Grid>
+
+                    <Separator Margin="0,0,0,14" Background="#2B3442" />
+
                     <TextBlock Text="Units"
                                Foreground="#EEF2F7"
                                FontSize="16"

@@ -49,10 +49,15 @@ public partial class MainWindow : Window
     private double _zoomWindowSeconds;
     private int _utcOffsetHours = -4;
     private AppSettings _settings = AppSettings.Load();
+    private bool _isRefreshingPaletteSelector;
 
     public MainWindow()
     {
         InitializeComponent();
+        _isRefreshingPaletteSelector = true;
+        FullPaletteListCheckBox.IsChecked = _settings.ShowFullPaletteList;
+        RefreshPaletteOptions(_settings.PaletteName);
+        _isRefreshingPaletteSelector = false;
 
         ChannelControls.ItemsSource = _channels;
 
@@ -305,6 +310,48 @@ public partial class MainWindow : Window
         UpdateCursorPositions();
     }
 
+    private void PaletteSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshingPaletteSelector)
+        {
+            return;
+        }
+
+        var selectedPalette = SelectedPaletteName();
+        var normalizedPalette = SonarPaletteCatalog.NormalizeName(selectedPalette);
+        if (string.Equals(_settings.PaletteName, normalizedPalette, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _settings = _settings with { PaletteName = normalizedPalette };
+        _settings.Save();
+
+        if (_recording is not null)
+        {
+            RebuildDepthScaledView();
+        }
+    }
+
+    private void PaletteListVisibilityChanged(object sender, RoutedEventArgs e)
+    {
+        if (_isRefreshingPaletteSelector)
+        {
+            return;
+        }
+
+        var showFullPaletteList = FullPaletteListCheckBox.IsChecked == true;
+        if (_settings.ShowFullPaletteList == showFullPaletteList)
+        {
+            RefreshPaletteOptions(_settings.PaletteName);
+            return;
+        }
+
+        _settings = _settings with { ShowFullPaletteList = showFullPaletteList };
+        _settings.Save();
+        RefreshPaletteOptions(_settings.PaletteName);
+    }
+
     private void DepthZoomIn_Click(object sender, RoutedEventArgs e)
     {
         if (_recording is null)
@@ -518,6 +565,27 @@ public partial class MainWindow : Window
             : 0;
     }
 
+    private string SelectedPaletteName()
+    {
+        return PaletteSelector?.SelectedItem is string paletteName
+            ? SonarPaletteCatalog.NormalizeName(paletteName)
+            : SonarPaletteCatalog.DefaultName;
+    }
+
+    private void RefreshPaletteOptions(string? preferredPalette = null)
+    {
+        var normalizedPalette = SonarPaletteCatalog.NormalizeName(preferredPalette ?? _settings.PaletteName);
+        var options = SonarPaletteCatalog.GetSelectableNames(_settings.ShowFullPaletteList, normalizedPalette)
+            .ToArray();
+
+        _isRefreshingPaletteSelector = true;
+        PaletteSelector.ItemsSource = options;
+        PaletteSelector.SelectedItem = options.FirstOrDefault(name =>
+            string.Equals(name, normalizedPalette, StringComparison.OrdinalIgnoreCase))
+            ?? SonarPaletteCatalog.DefaultName;
+        _isRefreshingPaletteSelector = false;
+    }
+
     private void RenderChannels()
     {
         ViewerHost.Children.Clear();
@@ -573,7 +641,10 @@ public partial class MainWindow : Window
         var displayMaxRange = GetDisplayMaxRangeMeters();
         _rawChannelImages = _recording is null
             ? new Dictionary<int, BitmapSource>()
-            : BinaryWaterfallRenderer.Render(_recording, displayMaxRange > 0 ? displayMaxRange : null);
+            : BinaryWaterfallRenderer.Render(
+                _recording,
+                displayMaxRange > 0 ? displayMaxRange : null,
+                _settings.PaletteName);
     }
 
     private void RenderStacked(IReadOnlyList<ChannelViewModel> channels)
@@ -1190,7 +1261,9 @@ public sealed record AppSettings(
     string? PythonPath = null,
     bool UseEnvironmentPython = true,
     string? PingverterRoot = null,
-    string? ProjectsRoot = null)
+    string? ProjectsRoot = null,
+    string PaletteName = SonarPaletteCatalog.DefaultName,
+    bool ShowFullPaletteList = false)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -1206,14 +1279,15 @@ public sealed record AppSettings(
         {
             if (!File.Exists(SettingsPath))
             {
-                return new AppSettings(PythonPath: null);
+                return new AppSettings(PythonPath: null, PaletteName: SonarPaletteCatalog.DefaultName, ShowFullPaletteList: false);
             }
 
-            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath)) ?? new AppSettings(PythonPath: null);
+            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath))
+                ?? new AppSettings(PythonPath: null, PaletteName: SonarPaletteCatalog.DefaultName, ShowFullPaletteList: false);
         }
         catch
         {
-            return new AppSettings(PythonPath: null);
+            return new AppSettings(PythonPath: null, PaletteName: SonarPaletteCatalog.DefaultName, ShowFullPaletteList: false);
         }
     }
 

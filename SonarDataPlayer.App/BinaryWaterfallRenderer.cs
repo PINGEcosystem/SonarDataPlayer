@@ -8,7 +8,10 @@ namespace SonarDataPlayer.App;
 
 public static class BinaryWaterfallRenderer
 {
-    public static IReadOnlyDictionary<int, BitmapSource> Render(SonarRecording recording, double? displayMaxRangeMeters = null)
+    public static IReadOnlyDictionary<int, BitmapSource> Render(
+        SonarRecording recording,
+        double? displayMaxRangeMeters = null,
+        string? paletteName = null)
     {
         if (recording.SamplesPath is null || recording.Frames.Count == 0)
         {
@@ -41,7 +44,7 @@ public static class BinaryWaterfallRenderer
             logMax = 1;
         }
 
-        var palette = GarminPalette.Build();
+        var palette = SonarPaletteCatalog.Build(paletteName);
         var output = new Dictionary<int, BitmapSource>();
 
         foreach (var channelId in channelIds)
